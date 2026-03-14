@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from work_harness.config import Settings
 from work_harness.connectors.atlassian_self_hosted_enterprise import (
     ConfluenceSelfHostedEnterpriseAdapter,
@@ -8,6 +10,8 @@ from work_harness.connectors.atlassian_self_hosted_enterprise import (
 from work_harness.connectors.github_enterprise_cloud import GitHubEnterpriseCloudAdapter
 from work_harness.connectors.slack_enterprise_grid import SlackEnterpriseGridAdapter
 from work_harness.domain.models import ConnectorSource
+
+logger = logging.getLogger("work_harness.connectors.factory")
 
 
 def build_connector(source: ConnectorSource, settings: Settings):
@@ -23,7 +27,7 @@ def build_connector(source: ConnectorSource, settings: Settings):
 
 
 def build_connectors(settings: Settings):
-    return {
+    connectors = {
         source: build_connector(source, settings)
         for source in (
             ConnectorSource.JIRA,
@@ -32,3 +36,5 @@ def build_connectors(settings: Settings):
             ConnectorSource.GITHUB,
         )
     }
+    logger.info("Built connectors: %s", [s.value for s in connectors])
+    return connectors

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from work_harness.config import Settings
@@ -12,6 +14,8 @@ from work_harness.domain.models import (
     EventSubscription,
 )
 
+logger = logging.getLogger("work_harness.connectors.github")
+
 
 class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
     source = ConnectorSource.GITHUB
@@ -20,6 +24,7 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
         self._settings = settings
 
     async def validate(self) -> dict[str, object]:
+        logger.debug("Validating GitHub connector")
         missing_fields = []
         token_missing = not self._settings.github_token
         repository_missing = not self._settings.github_repository
@@ -130,6 +135,7 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                                 f"{pulls_response.status_code}."
                             )
             except httpx.HTTPError as exc:
+                logger.error("GitHub validation HTTP error: %s", exc)
                 capabilities[0].status = CapabilityStatus.BLOCKED
                 capabilities[0].detail = f"Authentication probe failed: {exc}"
                 if not repository_missing:

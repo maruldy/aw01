@@ -1,3 +1,4 @@
+import { useTranslation } from "../lib/i18n";
 import type { WorkItem } from "../lib/types";
 
 interface WorkItemListProps {
@@ -7,14 +8,16 @@ interface WorkItemListProps {
 }
 
 export function WorkItemList({ items, selectedId, onSelect }: WorkItemListProps) {
+  const { t } = useTranslation();
+
   return (
     <div className="panel">
       <div className="flex items-center justify-between">
         <div>
-          <p className="eyebrow">AI Inbox</p>
-          <h2 className="panel-title">Incoming work</h2>
+          <p className="eyebrow">{t("workList.eyebrow")}</p>
+          <h2 className="panel-title">{t("workList.title")}</h2>
         </div>
-        <span className="pill">{items.length} items</span>
+        <span className="pill">{items.length} {t("workList.items")}</span>
       </div>
 
       <div className="mt-5 space-y-3">

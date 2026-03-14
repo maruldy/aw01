@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
@@ -19,6 +20,9 @@ def _is_verified(capabilities: list[ConnectorCapability], key: str) -> bool:
     return any(cap.key == key and cap.status == CapabilityStatus.VERIFIED for cap in capabilities)
 
 
+logger = logging.getLogger("work_harness.connectors.atlassian")
+
+
 class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
     source = ConnectorSource.JIRA
 
@@ -26,6 +30,7 @@ class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
         self._settings = settings
 
     async def validate(self) -> dict[str, Any]:
+        logger.debug("Validating Jira connector")
         missing_fields = []
         if not self._settings.jira_base_url:
             missing_fields.append("JIRA_BASE_URL")
@@ -112,6 +117,7 @@ class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
                             f"Issue search probe failed with status {search_response.status_code}."
                         )
             except httpx.HTTPError as exc:
+                logger.error("Jira validation HTTP error: %s", exc)
                 capabilities[0].status = CapabilityStatus.BLOCKED
                 capabilities[0].detail = f"Authentication probe failed: {exc}"
                 capabilities[1].status = CapabilityStatus.UNKNOWN
@@ -124,6 +130,7 @@ class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
                 )
 
         configured = not missing_fields and _is_verified(capabilities, "auth")
+        logger.info("Jira validation: configured=%s missing=%s", configured, missing_fields)
         message = (
             "Jira self-hosted is ready for read-only ingestion probes."
             if configured
@@ -160,6 +167,7 @@ class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
         )
 
     async def fetch_context(self, event: ActivityEvent) -> dict[str, Any]:
+        logger.debug("Fetching Jira context: event_type=%s", event.event_type)
         context = {
             "projects": (
                 self._settings.jira_projects.split(",")
@@ -258,6 +266,7 @@ class ConfluenceSelfHostedEnterpriseAdapter(ConnectorAdapter):
         self._settings = settings
 
     async def validate(self) -> dict[str, Any]:
+        logger.debug("Validating Confluence connector")
         missing_fields = []
         if not self._settings.confluence_url:
             missing_fields.append("CONFLUENCE_URL")

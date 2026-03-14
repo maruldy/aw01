@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { getRun, listWorkItems } from "../lib/api";
+import { useTranslation } from "../lib/i18n";
 import type { ExecutionRun, WorkItem } from "../lib/types";
 import { useRunStream } from "../hooks/use-run-stream";
 
 export function RunsPage() {
+  const { t } = useTranslation();
   const [items, setItems] = useState<WorkItem[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [run, setRun] = useState<ExecutionRun | null>(null);
@@ -35,8 +37,8 @@ export function RunsPage() {
   return (
     <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
       <div className="panel">
-        <p className="eyebrow">Execution runs</p>
-        <h1 className="panel-title">Track supervisor state</h1>
+        <p className="eyebrow">{t("runs.eyebrow")}</p>
+        <h1 className="panel-title">{t("runs.title")}</h1>
         <div className="mt-5 space-y-3">
           {items.map((item) => (
             <button
@@ -58,10 +60,10 @@ export function RunsPage() {
       <div className="panel">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="eyebrow">Run detail</p>
-            <h2 className="panel-title">{run?.current_step ?? "No run selected"}</h2>
+            <p className="eyebrow">{t("runs.detailEyebrow")}</p>
+            <h2 className="panel-title">{run?.current_step ?? t("runs.noRun")}</h2>
           </div>
-          <span className="pill">{run?.status ?? "idle"}</span>
+          <span className="pill">{run?.status ?? t("runs.idle")}</span>
         </div>
 
         <div className="mt-6 space-y-3">

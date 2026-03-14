@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -51,6 +52,9 @@ class GitHubConnectStartRequest(BaseModel):
     next_path: str = "/settings"
 
 
+logger = logging.getLogger("work_harness.api")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or Settings()
     connectors = build_connectors(app_settings)
@@ -93,11 +97,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def ensure_runtime(app: FastAPI) -> None:
         if getattr(app.state, "runtime_ready", False):
             return
+        logger.info("Initializing runtime: stores + scheduler")
         await knowledge_store.initialize()
         await settings_store.initialize()
         await webhook_store.initialize()
         scheduler.start()
         app.state.runtime_ready = True
+        logger.info("Runtime initialization complete")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -137,9 +143,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/ingress/{source}", status_code=202)
     async def ingress(source: str, request: IngressRequest) -> dict[str, Any]:
         await ensure_runtime(app)
+        logger.info(
+            "POST /ingress/%s type=%s id=%s",
+            source, request.event_type, request.external_id,
+        )
         try:
             connector_source = ConnectorSource(source)
         except ValueError as exc:
+            logger.warning("Unknown ingress source: %s", source)
             raise HTTPException(status_code=404, detail="Unknown source") from exc
         result = await app.state.harness.ingest_event(connector_source, request.model_dump())
         return {
@@ -175,9 +186,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/work-items/{item_id}/decision")
     async def decide(item_id: str, payload: DecisionPayload) -> dict[str, Any]:
         await ensure_runtime(app)
+        logger.info("POST /work-items/%s/decision decision=%s", item_id, payload.decision.value)
         try:
             item = await app.state.harness.decide(item_id, payload)
         except KeyError as exc:
+            logger.warning("Decision target not found: %s", item_id)
             raise HTTPException(status_code=404, detail="Work item not found") from exc
         return item.model_dump(mode="json")
 
@@ -301,6 +314,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         provider: WebhookProvider,
         request: Request,
     ) -> tuple[dict[str, Any], int]:
+        logger.info("Webhook received: provider=%s", provider.value)
         raw_body = await request.body()
         payload = await request.json()
         verification, envelope = await app.state.webhooks.receive(
@@ -308,6 +322,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raw_body,
             request.headers,
             payload,
+        )
+        logger.info(
+            "Webhook verified: provider=%s accepted=%s verified=%s delivery_id=%s event_type=%s",
+            provider.value, verification.accepted, verification.verified,
+            envelope.delivery_id, envelope.event_type,
         )
         knowledge_payload = {
             "knowledge_action": "skip",

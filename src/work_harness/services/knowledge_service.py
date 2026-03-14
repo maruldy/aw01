@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -19,6 +20,8 @@ from work_harness.services.knowledge_policy import (
 from work_harness.services.knowledge_store import KnowledgeStore
 from work_harness.services.settings_service import SettingsService
 
+logger = logging.getLogger("work_harness.services.knowledge")
+
 
 class KnowledgeService:
     def __init__(
@@ -34,6 +37,10 @@ class KnowledgeService:
         event: ActivityEvent,
         connector: ConnectorAdapter | None,
     ) -> dict[str, Any]:
+        logger.debug(
+            "Gathering context: source=%s type=%s",
+            event.source.value, event.event_type,
+        )
         runtime_settings = await self._settings_service.get_runtime_settings_for_source(
             event.source
         )
@@ -45,6 +52,11 @@ class KnowledgeService:
             k=5,
         )
         if knowledge_hits:
+            logger.info(
+                "Knowledge local hit: source=%s hits=%d scope=%s",
+                event.source.value, len(knowledge_hits),
+                decision.scope_key,
+            )
             return {
                 "knowledge_mode": "local_hit",
                 "knowledge_hits": knowledge_hits,
@@ -52,11 +64,20 @@ class KnowledgeService:
             }
 
         if connector is None or not decision.storeable:
+            logger.info(
+                "Knowledge miss: source=%s scope=%s storeable=%s",
+                event.source.value, decision.scope_key,
+                decision.storeable,
+            )
             return {
                 "knowledge_mode": "miss",
                 "knowledge_scope": decision.scope_key,
             }
 
+        logger.info(
+            "Knowledge remote fallback: source=%s scope=%s",
+            event.source.value, decision.scope_key,
+        )
         remote_context = await connector.fetch_context(event)
         return {
             "knowledge_mode": "remote_fallback",
@@ -69,12 +90,21 @@ class KnowledgeService:
         event: ActivityEvent,
         connector: ConnectorAdapter | None,
     ) -> KnowledgeSyncResult:
+        logger.info(
+            "Sync webhook: source=%s type=%s",
+            event.source.value, event.event_type,
+        )
         runtime_settings = await self._settings_service.get_runtime_settings_for_source(
             event.source
         )
         decision = evaluate_storeability(event, runtime_settings)
         action = self._decide_sync_action(event)
         analysis_id = self._stable_analysis_id(event.source, decision.record_key)
+        logger.debug(
+            "Sync decision: action=%s key=%s id=%s storeable=%s",
+            action.value, decision.record_key,
+            analysis_id, decision.storeable,
+        )
 
         if action == KnowledgeSyncAction.SKIP:
             return KnowledgeSyncResult(
@@ -127,6 +157,11 @@ class KnowledgeService:
             storeable=True,
         )
         await self._store.store_analysis(record)
+        logger.info(
+            "Knowledge upserted: id=%s key=%s scope=%s",
+            analysis_id, decision.record_key,
+            decision.scope_key,
+        )
         return KnowledgeSyncResult(
             action=KnowledgeSyncAction.UPSERT,
             record_key=decision.record_key,

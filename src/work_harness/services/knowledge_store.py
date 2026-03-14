@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,8 @@ from chromadb.config import Settings as ChromaSettings
 
 from work_harness.domain.models import AnalysisRecord
 
+logger = logging.getLogger("work_harness.services.knowledge_store")
+
 
 class KnowledgeStore:
     def __init__(self, db_path: Path, chroma_path: Path | None = None) -> None:
@@ -19,6 +22,10 @@ class KnowledgeStore:
         self._collection = None
 
     async def initialize(self) -> bool:
+        logger.info(
+            "Initializing KnowledgeStore: db=%s chroma=%s",
+            self._db_path, self._chroma_path,
+        )
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._chroma_path.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
@@ -101,9 +108,14 @@ class KnowledgeStore:
             settings=ChromaSettings(anonymized_telemetry=False),
         )
         self._collection = client.get_or_create_collection(name="knowledge_analyses")
+        logger.info("KnowledgeStore initialized successfully")
         return True
 
     async def store_analysis(self, record: AnalysisRecord) -> str:
+        logger.debug(
+            "Storing analysis: id=%s key=%s source=%s",
+            record.analysis_id, record.ticket_key, record.source,
+        )
         searchable_text = record.searchable_text or self._default_searchable_text(record)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
@@ -145,6 +157,7 @@ class KnowledgeStore:
         return record.analysis_id
 
     async def delete_analysis(self, analysis_id: str) -> None:
+        logger.info("Deleting analysis: analysis_id=%s", analysis_id)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
@@ -165,6 +178,10 @@ class KnowledgeStore:
         source: str | None = None,
         scope_key: str | None = None,
     ) -> list[dict]:
+        logger.debug(
+            "Searching: q=%s source=%s scope=%s k=%d",
+            query[:60], source, scope_key, k,
+        )
         like_query = f"%{query.lower()}%"
         exact_hits: dict[str, dict[str, Any]] = {}
         async with aiosqlite.connect(self._db_path) as db:

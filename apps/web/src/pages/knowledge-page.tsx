@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 
 import { getAuditRecent, getKnowledgeRecent, getKnowledgeStats } from "../lib/api";
+import { useTranslation } from "../lib/i18n";
 import { StatCard } from "../components/stat-card";
 
 export function KnowledgePage() {
+  const { t } = useTranslation();
   const [stats, setStats] = useState<{ total: number; avg_iterations: number; by_month: { month: string; count: number }[] } | null>(null);
   const [recent, setRecent] = useState<Array<Record<string, string>>>([]);
   const [audit, setAudit] = useState<Array<Record<string, unknown>>>([]);
@@ -25,14 +27,14 @@ export function KnowledgePage() {
   return (
     <div className="space-y-6">
       <section className="grid gap-4 md:grid-cols-2">
-        <StatCard label="Stored analyses" value={stats?.total ?? 0} hint="Accumulated event and decision context." />
-        <StatCard label="Average iterations" value={(stats?.avg_iterations ?? 0).toFixed(1)} hint="Mean synthesis iterations per stored analysis." />
+        <StatCard label={t("knowledge.storedAnalyses")} value={stats?.total ?? 0} hint={t("knowledge.storedHint")} />
+        <StatCard label={t("knowledge.avgIterations")} value={(stats?.avg_iterations ?? 0).toFixed(1)} hint={t("knowledge.avgHint")} />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <div className="panel">
-          <p className="eyebrow">Recent knowledge</p>
-          <h2 className="panel-title">Stored summaries</h2>
+          <p className="eyebrow">{t("knowledge.recentEyebrow")}</p>
+          <h2 className="panel-title">{t("knowledge.recentTitle")}</h2>
           <div className="mt-5 space-y-3">
             {recent.map((item) => (
               <div key={item.analysis_id} className="rounded-[22px] bg-white/80 p-4">
@@ -44,8 +46,8 @@ export function KnowledgePage() {
         </div>
 
         <div className="panel">
-          <p className="eyebrow">Audit stream</p>
-          <h2 className="panel-title">Recent operator-visible events</h2>
+          <p className="eyebrow">{t("knowledge.auditEyebrow")}</p>
+          <h2 className="panel-title">{t("knowledge.auditTitle")}</h2>
           <div className="mt-5 space-y-3">
             {audit.map((item, index) => (
               <div key={`${item.created_at ?? index}`} className="rounded-[22px] border border-black/5 bg-canvas px-4 py-3">

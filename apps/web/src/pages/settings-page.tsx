@@ -9,9 +9,11 @@ import {
   updateSubscriptions,
   validateProfile
 } from "../lib/api";
+import { useTranslation } from "../lib/i18n";
 import type { ConnectorProfile, GitHubRepository } from "../lib/types";
 
 export function SettingsPage() {
+  const { t } = useTranslation();
   const [profiles, setProfiles] = useState<ConnectorProfile[]>([]);
   const [validation, setValidation] = useState<Record<string, string>>({});
   const [draftConfigValues, setDraftConfigValues] = useState<Record<string, Record<string, string>>>({});
@@ -60,12 +62,12 @@ export function SettingsPage() {
       if (githubStatus === "connected") {
         setValidation((previous) => ({
           ...previous,
-          github: githubMessage ?? "GitHub connected. Select a repository to finish setup."
+          github: githubMessage ?? t("settings.githubConnected")
         }));
       } else if (githubStatus === "error") {
         setValidation((previous) => ({
           ...previous,
-          github: githubMessage ?? "GitHub connection failed."
+          github: githubMessage ?? t("settings.githubFailed")
         }));
       }
       if (githubStatus) {
@@ -90,7 +92,7 @@ export function SettingsPage() {
     );
     setValidation((previous) => ({
       ...previous,
-      [source]: result.ok ? "Connected" : "Checked safely with read-only probes"
+      [source]: result.ok ? t("settings.connectedStatus") : t("settings.checkedSafely")
     }));
   }
 
@@ -101,10 +103,7 @@ export function SettingsPage() {
     );
     setValidation((previous) => ({
       ...previous,
-      [source]:
-        source === "github"
-          ? "Repository saved. Run validate to refresh capability probes."
-          : "Configuration saved. Run validate to refresh capability probes."
+      [source]: source === "github" ? t("settings.repoSaved") : t("settings.configSaved")
     }));
   }
 
@@ -113,7 +112,7 @@ export function SettingsPage() {
     setProfiles((previous) => previous.map((profile) => (profile.source === source ? result : profile)));
     setValidation((previous) => ({
       ...previous,
-      [source]: "Subscription selection saved"
+      [source]: t("settings.subscriptionSaved")
     }));
   }
 
@@ -154,7 +153,7 @@ export function SettingsPage() {
       setValidation((previous) => ({
         ...previous,
         github:
-          error instanceof Error ? error.message : "GitHub connection could not be started."
+          error instanceof Error ? error.message : t("settings.githubStartFailed")
       }));
       setIsConnectingGitHub(false);
     }
@@ -163,16 +162,16 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       <section className="panel">
-        <p className="eyebrow">Setup wizard</p>
-        <h1 className="panel-title">Validate enterprise connectors</h1>
+        <p className="eyebrow">{t("settings.eyebrow")}</p>
+        <h1 className="panel-title">{t("settings.title")}</h1>
         <p className="mt-3 text-sm text-ink/70">
-          Knowledge is synced from webhook-driven lifecycle events.
+          {t("settings.subtitle")}
         </p>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="panel">
-          <p className="eyebrow">Connector profiles</p>
+          <p className="eyebrow">{t("settings.profilesEyebrow")}</p>
           <div className="mt-5 space-y-3">
             {profiles.map((profile) => (
               <div key={profile.source} className="rounded-[22px] border border-black/5 bg-white/80 p-4">
@@ -182,7 +181,7 @@ export function SettingsPage() {
                     <p className="mt-1 text-sm text-ink/60">{profile.source} · {profile.mode}</p>
                     {profile.identity ? (
                       <p className="mt-1 text-xs uppercase tracking-[0.18em] text-pine">
-                        Identity: {profile.identity}
+                        {t("settings.identity")}: {profile.identity}
                       </p>
                     ) : null}
                   </div>
@@ -192,14 +191,14 @@ export function SettingsPage() {
                       onClick={() => handleValidate(profile.source)}
                       className="rounded-[16px] bg-ocean px-4 py-2 text-sm font-semibold text-white"
                     >
-                      Validate
+                      {t("settings.validate")}
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSaveSubscriptions(profile.source)}
                       className="rounded-[16px] bg-ink px-4 py-2 text-sm font-semibold text-white"
                     >
-                      Save alerts
+                      {t("settings.saveAlerts")}
                     </button>
                   </div>
                 </div>
@@ -209,10 +208,10 @@ export function SettingsPage() {
                   </p>
                   {!profile.configured ? (
                     <p className="mt-2 text-xs uppercase tracking-[0.18em] text-signal">
-                      Missing: {profile.missing_fields.join(", ")}
+                      {t("settings.missing")}: {profile.missing_fields.join(", ")}
                     </p>
                   ) : (
-                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-pine">Ready for ingestion</p>
+                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-pine">{t("settings.ready")}</p>
                   )}
                 </div>
 
@@ -222,9 +221,9 @@ export function SettingsPage() {
                       <>
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="eyebrow">Browser connection</p>
+                            <p className="eyebrow">{t("settings.browserConnection")}</p>
                             <p className="mt-2 text-sm text-ink/70">
-                              Connect through GitHub in the browser, then choose which repository this harness should watch.
+                              {t("settings.browserConnectionDesc")}
                             </p>
                           </div>
                           <button
@@ -233,40 +232,40 @@ export function SettingsPage() {
                             disabled={isConnectingGitHub}
                             className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-signal/60"
                           >
-                            {isConnectingGitHub ? "Redirecting..." : profile.identity ? "Reconnect GitHub" : "Connect GitHub"}
+                            {isConnectingGitHub ? t("settings.redirecting") : profile.identity ? t("settings.reconnectGitHub") : t("settings.connectGitHub")}
                           </button>
                         </div>
 
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
                           <div className="rounded-[18px] bg-canvas px-4 py-3">
                             <div className="flex items-center justify-between gap-3">
-                              <span className="text-sm font-semibold text-ink">Connected account</span>
-                              {profile.identity ? <span className="pill">connected</span> : null}
+                              <span className="text-sm font-semibold text-ink">{t("settings.connectedAccount")}</span>
+                              {profile.identity ? <span className="pill">{t("settings.connected")}</span> : null}
                             </div>
                             <p className="mt-3 text-sm text-ink/70">
-                              {profile.identity ?? "No GitHub account is connected yet."}
+                              {profile.identity ?? t("settings.noGitHubAccount")}
                             </p>
                           </div>
 
                           <label className="rounded-[18px] bg-canvas px-4 py-3">
-                            <span className="text-sm font-semibold text-ink">Scoped repository</span>
+                            <span className="text-sm font-semibold text-ink">{t("settings.scopedRepo")}</span>
                             <select
                               value={draftConfigValues[profile.source]?.github_repository ?? ""}
                               onChange={(event) => updateConfigValue(profile.source, "github_repository", event.target.value)}
                               disabled={githubRepositories.length === 0}
                               className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal disabled:bg-black/5"
                             >
-                              <option value="">Select a repository</option>
+                              <option value="">{t("settings.selectRepo")}</option>
                               {githubRepositories.map((repository) => (
                                 <option key={repository.full_name} value={repository.full_name}>
-                                  {repository.full_name}{repository.private ? " (private)" : ""}
+                                  {repository.full_name}{repository.private ? ` ${t("settings.private")}` : ""}
                                 </option>
                               ))}
                             </select>
                             <p className="mt-2 text-xs text-ink/55">
                               {githubRepositories.length > 0
-                                ? "Choose the repository that should receive GitHub webhook events."
-                                : "Connect GitHub first to load repositories you can access."}
+                                ? t("settings.chooseRepo")
+                                : t("settings.connectFirst")}
                             </p>
                           </label>
                         </div>
@@ -278,7 +277,7 @@ export function SettingsPage() {
                             disabled={!draftConfigValues[profile.source]?.github_repository}
                             className="rounded-[16px] bg-ink px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-ink/60"
                           >
-                            Save repository
+                            {t("settings.saveRepo")}
                           </button>
                         </div>
                       </>
@@ -286,9 +285,9 @@ export function SettingsPage() {
                       <>
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="eyebrow">Connection inputs</p>
+                            <p className="eyebrow">{t("settings.connectionInputs")}</p>
                             <p className="mt-2 text-sm text-ink/70">
-                              Store only the minimum credentials and targets needed for safe read-only probing.
+                              {t("settings.connectionInputsDesc")}
                             </p>
                           </div>
                           <button
@@ -296,7 +295,7 @@ export function SettingsPage() {
                             onClick={() => handleSaveConfig(profile.source)}
                             className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white"
                           >
-                            Save config
+                            {t("settings.saveConfig")}
                           </button>
                         </div>
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -304,13 +303,13 @@ export function SettingsPage() {
                             <label key={field.key} className="rounded-[18px] bg-canvas px-4 py-3">
                               <div className="flex items-center justify-between gap-3">
                                 <span className="text-sm font-semibold text-ink">{field.label}</span>
-                                {field.sensitive && field.is_set ? <span className="pill">stored</span> : null}
+                                {field.sensitive && field.is_set ? <span className="pill">{t("settings.stored")}</span> : null}
                               </div>
                               <input
                                 type={field.sensitive ? "password" : "text"}
                                 value={draftConfigValues[profile.source]?.[field.key] ?? ""}
                                 onChange={(event) => updateConfigValue(profile.source, field.key, event.target.value)}
-                                placeholder={field.sensitive && field.is_set ? "Leave blank to keep current value" : field.placeholder}
+                                placeholder={field.sensitive && field.is_set ? t("settings.keepCurrent") : field.placeholder}
                                 className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal"
                               />
                               <p className="mt-2 text-xs text-ink/55">{field.help_text}</p>
@@ -323,27 +322,27 @@ export function SettingsPage() {
 
                   {profile.webhook ? (
                     <div className="rounded-[18px] border border-black/5 bg-white/90 p-4 lg:col-span-2">
-                      <p className="eyebrow">Webhook intake</p>
+                      <p className="eyebrow">{t("settings.webhookIntake")}</p>
                       <div className="mt-3 rounded-[16px] bg-canvas px-4 py-3">
-                        <p className="text-sm font-semibold text-ink">Callback URL</p>
+                        <p className="text-sm font-semibold text-ink">{t("settings.callbackUrl")}</p>
                         <p className="mt-2 break-all text-sm text-ink/70">
                           {profile.webhook.callback_url}
                         </p>
                       </div>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         <div className="rounded-[16px] bg-canvas px-4 py-3">
-                          <p className="text-sm font-semibold text-ink">Verification</p>
+                          <p className="text-sm font-semibold text-ink">{t("settings.verification")}</p>
                           <p className="mt-2 text-sm text-ink/70">
                             {profile.webhook.verification_mode}
                           </p>
                           {profile.webhook.secret_env_key ? (
                             <p className="mt-2 text-xs uppercase tracking-[0.18em] text-pine">
-                              Secret env: {profile.webhook.secret_env_key}
+                              {t("settings.secretEnv")}: {profile.webhook.secret_env_key}
                             </p>
                           ) : null}
                         </div>
                         <div className="rounded-[16px] bg-canvas px-4 py-3">
-                          <p className="text-sm font-semibold text-ink">Recommended events</p>
+                          <p className="text-sm font-semibold text-ink">{t("settings.recommendedEvents")}</p>
                           <p className="mt-2 text-sm text-ink/70">
                             {profile.webhook.recommended_events.join(", ")}
                           </p>
@@ -360,7 +359,7 @@ export function SettingsPage() {
                   ) : null}
 
                   <div className="rounded-[18px] border border-black/5 bg-white/90 p-4">
-                    <p className="eyebrow">Capability probe</p>
+                    <p className="eyebrow">{t("settings.capabilityProbe")}</p>
                     <div className="mt-3 space-y-3">
                       {profile.capabilities.map((capability) => (
                         <div key={capability.key} className="rounded-[16px] bg-canvas px-3 py-3">
@@ -375,7 +374,7 @@ export function SettingsPage() {
                   </div>
 
                   <div className="rounded-[18px] border border-black/5 bg-white/90 p-4">
-                    <p className="eyebrow">Alert subscriptions</p>
+                    <p className="eyebrow">{t("settings.alertSubscriptions")}</p>
                     <p className="mt-3 text-sm leading-7 text-ink/70">{profile.advisory}</p>
                     <div className="mt-4 space-y-3">
                       {profile.subscriptions.map((subscription) => {
@@ -400,8 +399,8 @@ export function SettingsPage() {
                               <div className="flex-1">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <p className="text-sm font-semibold text-ink">{subscription.label}</p>
-                                  {subscription.recommended ? <span className="pill">recommended</span> : null}
-                                  {!subscription.available ? <span className="pill">blocked</span> : null}
+                                  {subscription.recommended ? <span className="pill">{t("settings.recommended")}</span> : null}
+                                  {!subscription.available ? <span className="pill">{t("settings.blocked")}</span> : null}
                                 </div>
                                 <p className="mt-2 text-sm text-ink/65">{subscription.description}</p>
                               </div>
@@ -418,12 +417,12 @@ export function SettingsPage() {
         </div>
 
         <div className="panel">
-          <p className="eyebrow">Scheduler</p>
-          <h2 className="panel-title">Registered jobs</h2>
+          <p className="eyebrow">{t("settings.scheduler")}</p>
+          <h2 className="panel-title">{t("settings.registeredJobs")}</h2>
           <div className="mt-5 space-y-3">
             {jobs.length === 0 ? (
               <div className="rounded-[22px] bg-canvas px-4 py-3 text-sm text-ink/65">
-                No recurring jobs are registered.
+                {t("settings.noJobs")}
               </div>
             ) : null}
             {jobs.map((job) => (

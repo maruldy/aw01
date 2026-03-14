@@ -1,39 +1,99 @@
-# Repository Guide
+# 저장소 가이드
 
-## Scope
+## 범위
 
-These instructions apply to the entire repository.
+이 지침은 저장소 전체에 적용됩니다.
 
-## Working Style
+## 작업 스타일
 
-- Make surgical changes only.
-- Prefer the simplest implementation that satisfies the current requirement.
-- Do not add speculative abstractions or dormant features.
-- Keep Python and TypeScript changes aligned with the existing style.
+- 최소한의 변경만 수행할 것.
+- 현재 요구사항을 충족하는 가장 단순한 구현을 선호할 것.
+- 추측성 추상화나 비활성 기능을 추가하지 말 것.
+- Python과 TypeScript 변경은 기존 스타일에 맞출 것.
 
-## Verification
+## 검증
 
-Run the relevant checks after changes:
+변경 후 관련 검사를 실행할 것:
 
 - `uv run --extra dev pytest`
 - `uv run --extra dev ruff check src tests`
 - `npm --prefix apps/web run build`
 
-## Knowledge System Rules
+## 지식 시스템 규칙
 
-- SQLite is the source of truth for stored knowledge.
-- ChromaDB is only the semantic index.
-- Knowledge mutations must stay centralized in `src/work_harness/services/knowledge_service.py`.
-- Startup-time automatic knowledge seeding is disabled.
-- Knowledge should be stored, updated, or removed only through explicit policy-approved flows.
+- SQLite가 저장된 지식의 원본(source of truth)이다.
+- ChromaDB는 시맨틱 인덱스 역할만 한다.
+- 지식 변경은 `src/work_harness/services/knowledge_service.py`에 중앙화되어야 한다.
+- 시작 시 자동 지식 시딩은 비활성화되어 있다.
+- 지식은 명시적으로 정책이 승인한 흐름을 통해서만 저장, 수정, 삭제해야 한다.
 
-## Webhook Rules
+## 웹훅 규칙
 
-- Webhook delivery logging stays separate from work-item creation.
-- Signature verification is required when a provider secret is configured.
-- Provider-specific lifecycle events may mutate knowledge, but those rules should remain centralized in the knowledge service.
+- 웹훅 수신 로깅은 작업 항목(work-item) 생성과 분리되어야 한다.
+- 프로바이더 시크릿이 설정된 경우 서명 검증이 필수이다.
+- 프로바이더별 라이프사이클 이벤트가 지식을 변경할 수 있지만, 해당 규칙은 knowledge service에 중앙화되어야 한다.
 
-## Safety
+## 안전
 
-- Do not add bulk historical sync by default.
-- Any future historical import must be scoped, rate-limited, and operator-approved.
+- 기본적으로 대량 히스토리 동기화를 추가하지 말 것.
+- 향후 히스토리 임포트는 범위가 제한되고, 속도 제한이 있으며, 운영자 승인을 받아야 한다.
+
+## 4가지 세부 원칙
+
+### 1. 코딩 전에 생각하기
+가정하지 말 것. 혼란스러움을 숨기지 말 것. 트레이드오프를 드러낼 것.
+
+LLM은 종종 조용히 한 가지 해석을 선택하고 그대로 진행합니다. 이 원칙은 명시적인 추론을 강제합니다:
+
+- 가정을 명시적으로 진술할 것 — 확실하지 않은 경우 추측하지 말고 질문할 것
+- 여러 해석을 제시할 것 — 모호성이 존재할 때 조용히 하나를 선택하지 말 것
+- 필요할 때는 이의를 제기할 것 — 더 간단한 접근 방식이 있다면 그렇게 말할 것
+- 혼란스러울 때는 멈출 것 — 불명확한 부분을 명확히 밝히고 설명을 요청할 것
+
+### 2. 단순성 우선
+문제를 해결하는 최소한의 코드. 추측성 코드는 작성하지 말 것.
+
+과도한 엔지니어링 경향을 피할 것:
+
+- 요청받지 않은 기능 추가 금지
+- 단일 사용 코드를 위한 추상화 금지
+- 요청받지 않은 "유연성"이나 "설정 가능성" 추가 금지
+- 불가능한 시나리오에 대한 에러 처리 금지
+- 200줄의 코드를 50줄로 줄일 수 있다면 다시 작성할 것
+- 테스트: 시니어 엔지니어가 이것을 너무 복잡하다고 말할 것인가? 그렇다면 단순화할 것.
+
+### 3. 외과 수술 같은 변경
+반드시 필요한 부분만 건드릴 것. 자신이 만든 문제만 정리할 것.
+
+기존 코드를 수정할 때:
+
+- 인접한 코드, 주석 또는 포맷팅을 "개선"하지 말 것
+- 고장 나지 않은 것을 리팩토링하지 말 것
+- 자신의 방식과 다르더라도 기존 스타일을 맞출 것
+- 관련 없는 사용되지 않는 코드(dead code)를 발견하면 언급만 하고 — 삭제하지 말 것
+
+변경으로 인해 고아(orphan) 코드가 생성된 경우:
+
+- 자신의 변경으로 인해 사용되지 않게 된 import/변수/함수만 제거할 것
+- 요청받지 않는 한 기존의 사용되지 않는 코드는 제거하지 말 것
+- 테스트: 변경된 모든 줄은 사용자의 요청과 직접적으로 연결되어야 함.
+
+### 4. 목표 주도적 실행
+성공 기준을 정의할 것. 검증될 때까지 반복할 것.
+
+명령형 작업을 검증 가능한 목표로 변환할 것:
+
+| 대신... | 이렇게 변환할 것... |
+| --- | --- |
+| "유효성 검사 추가" | "잘못된 입력에 대한 테스트를 작성한 다음 통과하게 만들 것" |
+| "버그 수정" | "문제를 재현하는 테스트를 작성한 다음 통과하게 만들 것" |
+| "X 리팩토링" | "전후에 테스트가 통과하는지 확인할 것" |
+
+여러 단계의 작업의 경우, 간략한 계획을 명시할 것:
+
+1. [단계] → 검증: [확인할 내용]
+2. [단계] → 검증: [확인할 내용]
+3. [단계] → 검증: [확인할 내용]
+
+강력한 성공 기준은 LLM이 독립적으로 반복할 수 있게 합니다. 약한 기준("작동하게 만들기")은 끊임없는 명확화를 요구합니다.
+

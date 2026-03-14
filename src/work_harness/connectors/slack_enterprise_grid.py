@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from work_harness.config import Settings
@@ -17,6 +19,9 @@ def _has_scope(scopes: list[str], *required: str) -> bool:
     return any(scope in scopes for scope in required)
 
 
+logger = logging.getLogger("work_harness.connectors.slack")
+
+
 class SlackEnterpriseGridAdapter(ConnectorAdapter):
     source = ConnectorSource.SLACK
 
@@ -24,6 +29,7 @@ class SlackEnterpriseGridAdapter(ConnectorAdapter):
         self._settings = settings
 
     async def validate(self) -> dict[str, object]:
+        logger.debug("Validating Slack connector")
         missing_fields = []
         if not self._settings.slack_bot_token:
             missing_fields.append("SLACK_BOT_TOKEN")

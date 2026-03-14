@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { createIngress, decideWorkItem, getProfiles, listWorkItems } from "../lib/api";
+import { useTranslation } from "../lib/i18n";
 import type { ConnectorProfile, WorkItem } from "../lib/types";
 import { WorkItemDetail } from "../components/work-item-detail";
 import { WorkItemList } from "../components/work-item-list";
@@ -31,6 +32,7 @@ const presets = {
 };
 
 export function InboxPage() {
+  const { t } = useTranslation();
   const [items, setItems] = useState<WorkItem[]>([]);
   const [profiles, setProfiles] = useState<ConnectorProfile[]>([]);
   const [selectedId, setSelectedId] = useState<string>();
@@ -81,10 +83,10 @@ export function InboxPage() {
       <section className="panel">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="eyebrow">Supervisor Console</p>
+            <p className="eyebrow">{t("inbox.eyebrow")}</p>
             <h1 className="font-display text-4xl leading-tight lg:text-5xl">
-              Push work to the operator.
-              <span className="block text-signal">Keep human control at the approval edge.</span>
+              {t("inbox.heroTitle")}
+              <span className="block text-signal">{t("inbox.heroAccent")}</span>
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
@@ -93,9 +95,9 @@ export function InboxPage() {
               onChange={(event) => setSource(event.target.value as "slack" | "jira" | "github")}
               className="rounded-[18px] border border-black/10 bg-white px-4 py-3 text-sm"
             >
-              <option value="slack">Slack mention</option>
-              <option value="jira">Jira update</option>
-              <option value="github">GitHub review request</option>
+              <option value="slack">{t("inbox.slackMention")}</option>
+              <option value="jira">{t("inbox.jiraUpdate")}</option>
+              <option value="github">{t("inbox.githubReview")}</option>
             </select>
             <button
               type="button"
@@ -103,27 +105,25 @@ export function InboxPage() {
               disabled={isSubmitting}
               className="rounded-[18px] bg-signal px-5 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px] disabled:opacity-60"
             >
-              {isSubmitting ? "Injecting..." : "Simulate inbound work"}
+              {isSubmitting ? t("inbox.injecting") : t("inbox.simulate")}
             </button>
           </div>
         </div>
 
         {disconnectedProfiles.length > 0 ? (
           <div className="mt-6 rounded-[24px] border border-signal/20 bg-signal/10 p-5">
-            <p className="eyebrow text-signal">Connector setup required</p>
+            <p className="eyebrow text-signal">{t("inbox.connectorRequired")}</p>
             <p className="mt-3 font-display text-2xl">
-              실제 사내 이벤트는 아직 들어오지 않습니다.
+              {t("inbox.noEvents")}
             </p>
             <p className="mt-3 text-sm leading-7 text-ink/75">
-              {disconnectedProfiles.map((profile) => profile.source).join(", ")} 연동이 비어 있습니다.
-              Settings에서 자격증명을 연결하면 실제 Jira, Confluence, Slack, GitHub 활동이 inbox로 유입됩니다.
-              지금은 데모 이벤트만 주입할 수 있습니다.
+              {disconnectedProfiles.map((profile) => profile.source).join(", ")} {t("inbox.disconnectedMsg")}
             </p>
             <Link
               to="/settings"
               className="mt-4 inline-flex rounded-[18px] bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px]"
             >
-              Open setup wizard
+              {t("inbox.openWizard")}
             </Link>
           </div>
         ) : null}

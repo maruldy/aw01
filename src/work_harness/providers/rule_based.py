@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from work_harness.providers.base import CompletionResult
+
+logger = logging.getLogger("work_harness.providers.rule_based")
 
 
 class RuleBasedChatProvider:
@@ -16,6 +20,7 @@ class RuleBasedChatProvider:
             priority = "high"
         elif "jira" in lowered or "confluence" in lowered:
             recommended_agent = "atlassian_context"
+        logger.debug("Rule-based completion: priority=%s agent=%s", priority, recommended_agent)
         return CompletionResult(
             content="rule-based",
             data={

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -24,6 +25,9 @@ class SupervisorState(TypedDict, total=False):
     proposal_data: dict[str, Any]
     work_item: WorkItem
     run: ExecutionRun
+
+
+logger = logging.getLogger("work_harness.graph.supervisor")
 
 
 class SupervisorService:
@@ -59,15 +63,30 @@ class SupervisorService:
             "jira": "atlassian_context",
             "confluence": "atlassian_context",
         }
-        return {"route": route_map.get(event.source.value, "briefing")}
+        route = route_map.get(event.source.value, "briefing")
+        logger.info(
+            "Triage: source=%s type=%s -> route=%s",
+            event.source.value, event.event_type, route,
+        )
+        return {"route": route}
 
     async def _gather_context(self, state: SupervisorState) -> SupervisorState:
         event = state["event"]
         connector = self._connectors.get(event.source)
+        logger.debug(
+            "Gathering context: source=%s knowledge_svc=%s connector=%s",
+            event.source.value, self._knowledge_service is not None,
+            connector is not None,
+        )
         if self._knowledge_service is not None:
             context = await self._knowledge_service.gather_context(event, connector)
         else:
             context = await connector.fetch_context(event) if connector else {}
+        knowledge_mode = context.get("knowledge_mode") if isinstance(context, dict) else None
+        logger.info(
+            "Context gathered: source=%s mode=%s",
+            event.source.value, knowledge_mode,
+        )
         return {"context": context}
 
     async def _build_proposal(self, state: SupervisorState) -> SupervisorState:
@@ -99,11 +118,20 @@ class SupervisorService:
         data.setdefault("suggested_action", "Inspect the work item and decide next action.")
         data.setdefault("priority", "medium")
         data.setdefault("recommended_agent", route)
+        logger.info(
+            "Proposal built: priority=%s agent=%s provider=%s",
+            data["priority"], data["recommended_agent"],
+            type(self._chat_provider).__name__,
+        )
         return {"proposal_data": data}
 
     async def _create_work_item(self, state: SupervisorState) -> SupervisorState:
         event = state["event"]
         proposal_data = state["proposal_data"]
+        logger.debug(
+            "Creating work item: source=%s data=%s",
+            event.source.value, proposal_data,
+        )
         proposal = WorkProposal(
             summary=proposal_data["summary"],
             suggested_action=proposal_data["suggested_action"],
@@ -130,10 +158,27 @@ class SupervisorService:
                 {"type": "proposal", "summary": proposal.summary},
             ],
         )
+        logger.info(
+            "Work item created: id=%s thread=%s",
+            work_item.id, work_item.thread_id,
+        )
         return {"work_item": work_item, "run": run}
 
     async def handle_event(self, event: ActivityEvent) -> GraphResult:
-        result = await self._graph.ainvoke({"event": event})
+        logger.info(
+            "Supervisor handling: source=%s type=%s id=%s",
+            event.source.value, event.event_type,
+            event.external_id,
+        )
+        try:
+            result = await self._graph.ainvoke({"event": event})
+        except Exception:
+            logger.exception(
+                "Supervisor graph failed: source=%s type=%s",
+                event.source.value, event.event_type,
+            )
+            raise
+        logger.info("Supervisor completed: work_item_id=%s", result["work_item"].id)
         return GraphResult(work_item=result["work_item"], run=result["run"])
 
     def _build_context_notes(self, state: SupervisorState) -> list[str]:

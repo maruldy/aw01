@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import time
 from typing import Any, Mapping
 
@@ -16,6 +17,9 @@ from work_harness.services.webhook_store import WebhookStore
 SLACK_SIGNATURE_TTL_SECONDS = 300
 
 
+logger = logging.getLogger("work_harness.services.webhook")
+
+
 class WebhookReceiverService:
     def __init__(self, settings: Settings, store: WebhookStore) -> None:
         self._settings = settings
@@ -28,6 +32,7 @@ class WebhookReceiverService:
         headers: Mapping[str, str],
         payload: dict[str, Any],
     ) -> tuple[WebhookVerificationResult, WebhookDeliveryEnvelope]:
+        logger.debug("Receiving webhook: provider=%s body_size=%d", provider.value, len(raw_body))
         verification = self.verify_request(provider, raw_body, headers)
         envelope = self.normalize_envelope(
             provider,
@@ -37,6 +42,13 @@ class WebhookReceiverService:
             raw_body,
         )
         await self.persist_delivery(envelope)
+        logger.info(
+            "Webhook processed: provider=%s delivery=%s "
+            "accepted=%s verified=%s method=%s",
+            provider.value, envelope.delivery_id,
+            verification.accepted, verification.verified,
+            verification.verification_method,
+        )
         return verification, envelope
 
     def verify_request(

@@ -1,18 +1,18 @@
 # LangGraph Work Harness
 
-Event-driven AI work harness for enterprise operations. The system is built around a LangGraph supervisor that turns inbound Jira, Confluence, Slack, and GitHub activity into operator-facing work items instead of chat replies.
+엔터프라이즈 운영을 위한 이벤트 기반 AI 작업 하네스. Jira, Confluence, Slack, GitHub에서 들어오는 활동을 채팅 응답 대신 운영자 대면 작업 항목(work item)으로 변환하는 LangGraph supervisor를 중심으로 구축되었습니다.
 
-## What is included
+## 포함 내용
 
-- FastAPI backend with a LangGraph supervisor graph
-- Self-hosted Jira and Confluence adapters, plus Slack Enterprise Grid and GitHub Enterprise Cloud adapters
-- Safety harness with tool allowlist and approval-aware action policy
-- SQLite-backed knowledge store and scheduler services
-- Hybrid knowledge retrieval with SQLite as the source of truth and ChromaDB as the semantic index
-- React + Vite frontend with inbox, runs, knowledge, and settings views
-- Local development helpers: `.env.example`, `Makefile`, Docker, and GitHub Actions CI
+- LangGraph supervisor 그래프가 포함된 FastAPI 백엔드
+- 자체 호스팅 Jira/Confluence 어댑터, Slack Enterprise Grid 및 GitHub Enterprise Cloud 어댑터
+- 도구 허용 목록과 승인 기반 액션 정책을 갖춘 안전 하네스
+- SQLite 기반 지식 저장소 및 스케줄러 서비스
+- SQLite를 원본으로, ChromaDB를 시맨틱 인덱스로 사용하는 하이브리드 지식 검색
+- 인박스, 실행, 지식, 설정 뷰가 있는 React + Vite 프론트엔드
+- 로컬 개발 도구: `.env.example`, `Makefile`, Docker, GitHub Actions CI
 
-## Local development
+## 로컬 개발
 
 ```bash
 cp .env.example .env
@@ -22,14 +22,14 @@ make run-api
 make run-web
 ```
 
-The frontend runs on `http://localhost:5173` and the backend on `http://localhost:8000`.
+프론트엔드는 `http://localhost:5173`, 백엔드는 `http://localhost:8000`에서 실행됩니다.
 
-## Architecture notes
+## 아키텍처 참고
 
-- Jira and Confluence are assumed to be self-hosted enterprise deployments.
-- Slack and GitHub are assumed to be cloud enterprise products.
-- MCP is not required by the core runtime. SaaS and self-hosted system access goes through typed connector adapters; local side effects go through an allowlisted CLI registry.
-- The UI is push-first: agents create work items, and the operator responds with `accept`, `reject`, `advise`, or `defer`.
-- Knowledge retrieval is local-first. The harness checks scoped local knowledge before using a single-resource remote fallback.
+- Jira와 Confluence는 자체 호스팅 엔터프라이즈 배포를 전제로 합니다.
+- Slack과 GitHub는 클라우드 엔터프라이즈 제품을 전제로 합니다.
+- MCP는 코어 런타임에 필요하지 않습니다. SaaS 및 자체 호스팅 시스템 접근은 타입이 지정된 커넥터 어댑터를 통하고, 로컬 사이드 이펙트는 허용 목록에 등록된 CLI 레지스트리를 통합니다.
+- UI는 push-first 방식입니다: 에이전트가 작업 항목을 생성하면, 운영자가 `accept`, `reject`, `advise`, `defer`로 응답합니다.
+- 지식 검색은 local-first 방식입니다. 하네스는 범위 지정된 로컬 지식을 먼저 확인한 후 단일 리소스 원격 폴백을 사용합니다.
 
-Knowledge sync policy is documented in [knowledge_backfill.md](docs/knowledge_backfill.md), [webhook_setup.md](docs/webhook_setup.md), and [knowledge_strategy.md](docs/knowledge_strategy.md).
+지식 동기화 정책은 [knowledge_strategy.md](docs/knowledge_strategy.md)와 [webhook_setup.md](docs/webhook_setup.md)에 문서화되어 있습니다.

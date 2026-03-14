@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
@@ -42,6 +43,9 @@ class RunEventBus:
             subscribers.remove(queue)
 
 
+logger = logging.getLogger("work_harness.services.harness")
+
+
 class HarnessService:
     def __init__(
         self,
@@ -59,16 +63,25 @@ class HarnessService:
         self._bus = RunEventBus()
 
     async def ingest_event(self, source: ConnectorSource, payload: dict[str, Any]) -> IngressResult:
+        logger.info("Ingesting event: source=%s", source.value)
         connector = self._connectors.get(source)
         if connector:
             event = await connector.handle_webhook(payload)
         else:
             event = ActivityEvent(source=source, **payload)
+        logger.debug(
+            "Event parsed: type=%s id=%s actor=%s",
+            event.event_type, event.external_id, event.actor,
+        )
 
         should_process, subscription_key, reason = (
             await self._settings_service.should_process_event(source, event)
         )
         if not should_process:
+            logger.info(
+                "Event skipped: source=%s key=%s reason=%s",
+                source.value, subscription_key, reason,
+            )
             await self._audit_log.append(
                 "work_item.skipped",
                 {
@@ -93,6 +106,10 @@ class HarnessService:
             result.run.thread_id,
             {"type": "work_item_created", "work_item_id": result.work_item.id},
         )
+        logger.info(
+            "Work item created: id=%s source=%s key=%s",
+            result.work_item.id, source.value, subscription_key,
+        )
         return IngressResult(
             processed=True,
             source=source,
@@ -110,8 +127,10 @@ class HarnessService:
         return await self._work_items.get(item_id)
 
     async def decide(self, item_id: str, payload: DecisionPayload) -> WorkItem:
+        logger.info("Decision: item_id=%s decision=%s", item_id, payload.decision.value)
         item = await self._work_items.get(item_id)
         if item is None:
+            logger.warning("Decision target not found: %s", item_id)
             raise KeyError(item_id)
 
         status_map = {
