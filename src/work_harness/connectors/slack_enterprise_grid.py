@@ -167,7 +167,34 @@ class SlackEnterpriseGridAdapter(ConnectorAdapter):
         )
 
     async def fetch_context(self, event: ActivityEvent) -> dict[str, object]:
-        return {"my_user_id": self._settings.slack_my_user_id}
+        context: dict[str, object] = {"my_user_id": self._settings.slack_my_user_id}
+        if not self._settings.slack_bot_token:
+            return context
+
+        payload = event.metadata if isinstance(event.metadata, dict) else {}
+        slack_event = payload.get("event", {})
+        channel = slack_event.get("channel") if isinstance(slack_event, dict) else None
+        if not channel:
+            return context
+
+        headers = {"Authorization": f"Bearer {self._settings.slack_bot_token}"}
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    "https://slack.com/api/conversations.info",
+                    headers=headers,
+                    params={"channel": channel},
+                )
+            if response.is_success and response.json().get("ok"):
+                channel_info = response.json().get("channel", {})
+                context["remote_resource"] = {
+                    "channel": channel_info.get("id"),
+                    "name": channel_info.get("name"),
+                    "is_private": channel_info.get("is_private"),
+                }
+        except httpx.HTTPError:
+            return context
+        return context
 
     async def execute_remote_action(
         self,

@@ -15,6 +15,18 @@ The current code path lives in [backfill.py](../src/work_harness/services/backfi
 
 This proves the orchestration, scheduler registration, and storage path end to end without requiring live enterprise credentials during local development.
 
+## Current operating policy
+
+Backfill is not the default knowledge strategy.
+
+The implemented runtime now prefers:
+
+1. local scoped retrieval from SQLite + ChromaDB
+2. scoped single-resource remote fallback on a local miss
+3. storeability checks before persistence
+
+That keeps the system safe for internal services while still letting the harness accumulate useful knowledge over time.
+
 ## Target production flow
 
 In production, the intended backfill pipeline is:

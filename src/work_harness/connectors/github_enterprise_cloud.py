@@ -184,7 +184,46 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
         )
 
     async def fetch_context(self, event: ActivityEvent) -> dict[str, object]:
-        return {"repository": self._settings.github_repository}
+        context: dict[str, object] = {"repository": self._settings.github_repository}
+        if not self._settings.github_token or not self._settings.github_repository:
+            return context
+
+        payload = event.metadata if isinstance(event.metadata, dict) else {}
+        pull_request = payload.get("pull_request", {})
+        issue = payload.get("issue", {})
+        number = None
+        endpoint = None
+        if isinstance(pull_request, dict) and pull_request.get("number"):
+            number = pull_request["number"]
+            endpoint = f"/repos/{self._settings.github_repository}/pulls/{number}"
+        elif isinstance(issue, dict) and issue.get("number"):
+            number = issue["number"]
+            endpoint = f"/repos/{self._settings.github_repository}/issues/{number}"
+        if endpoint is None:
+            return context
+
+        headers = {
+            "Authorization": f"Bearer {self._settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.github_base_url.rstrip("/"),
+                headers=headers,
+                timeout=5.0,
+            ) as client:
+                response = await client.get(endpoint)
+            if response.is_success:
+                data = response.json()
+                context["remote_resource"] = {
+                    "number": data.get("number"),
+                    "state": data.get("state"),
+                    "title": data.get("title"),
+                    "updated_at": data.get("updated_at"),
+                }
+        except httpx.HTTPError:
+            return context
+        return context
 
     async def execute_remote_action(
         self,

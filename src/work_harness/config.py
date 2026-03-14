@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = None
     slack_user_token: str | None = None
     slack_my_user_id: str | None = None
+    slack_allowed_channels: str = ""
     slack_signing_secret: str | None = None
 
     github_base_url: str = "https://api.github.com"

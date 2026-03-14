@@ -231,10 +231,17 @@ class PolicyEvaluation(BaseModel):
 class AnalysisRecord(BaseModel):
     analysis_id: str = Field(default_factory=lambda: str(uuid4()))
     ticket_key: str
+    source: ConnectorSource | None = None
+    scope_type: str | None = None
+    scope_key: str | None = None
+    actor: str | None = None
+    canonical_url: str | None = None
     core_issue: str
     keywords: list[str] = Field(default_factory=list)
     summary: str
     final_summary: str
+    searchable_text: str | None = None
+    storeable: bool = True
     jira_search_results: list[str] = Field(default_factory=list)
     confluence_search_results: list[str] = Field(default_factory=list)
     cross_reference_results: list[str] = Field(default_factory=list)

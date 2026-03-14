@@ -160,13 +160,47 @@ class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
         )
 
     async def fetch_context(self, event: ActivityEvent) -> dict[str, Any]:
-        return {
+        context = {
             "projects": (
                 self._settings.jira_projects.split(",")
                 if self._settings.jira_projects
                 else []
             )
         }
+        if not self._settings.jira_base_url or not self._settings.jira_api_token:
+            return context
+
+        issue = event.metadata.get("issue", {}) if isinstance(event.metadata, dict) else {}
+        issue_key = issue.get("key") if isinstance(issue, dict) else None
+        if not issue_key:
+            return context
+
+        headers = {
+            "Authorization": f"Bearer {self._settings.jira_api_token}",
+            "Accept": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.jira_base_url.rstrip("/"),
+                headers=headers,
+                timeout=5.0,
+            ) as client:
+                response = await client.get(
+                    f"/rest/api/2/issue/{issue_key}",
+                    params={"fields": "summary,status,priority,assignee,updated"},
+                )
+            if response.is_success:
+                fields = response.json().get("fields", {})
+                context["remote_resource"] = {
+                    "issue_key": issue_key,
+                    "summary": fields.get("summary"),
+                    "status": (fields.get("status") or {}).get("name"),
+                    "priority": (fields.get("priority") or {}).get("name"),
+                    "updated": fields.get("updated"),
+                }
+        except httpx.HTTPError:
+            return context
+        return context
 
     async def execute_remote_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -357,13 +391,46 @@ class ConfluenceSelfHostedEnterpriseAdapter(ConnectorAdapter):
         )
 
     async def fetch_context(self, event: ActivityEvent) -> dict[str, Any]:
-        return {
+        context = {
             "spaces": (
                 self._settings.confluence_spaces.split(",")
                 if self._settings.confluence_spaces
                 else []
             )
         }
+        if not self._settings.confluence_url or not self._settings.confluence_api_token:
+            return context
+
+        page = event.metadata.get("page", {}) if isinstance(event.metadata, dict) else {}
+        page_id = page.get("id") if isinstance(page, dict) else None
+        if not page_id:
+            return context
+
+        headers = {
+            "Authorization": f"Bearer {self._settings.confluence_api_token}",
+            "Accept": "application/json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.confluence_url.rstrip("/"),
+                headers=headers,
+                timeout=5.0,
+            ) as client:
+                response = await client.get(
+                    f"/rest/api/content/{page_id}",
+                    params={"expand": "space,version"},
+                )
+            if response.is_success:
+                data = response.json()
+                context["remote_resource"] = {
+                    "page_id": data.get("id"),
+                    "title": data.get("title"),
+                    "space_key": (data.get("space") or {}).get("key"),
+                    "version": (data.get("version") or {}).get("number"),
+                }
+        except httpx.HTTPError:
+            return context
+        return context
 
     async def execute_remote_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {

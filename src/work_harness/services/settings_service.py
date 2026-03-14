@@ -85,6 +85,15 @@ CONFIG_FIELD_DEFINITIONS: dict[ConnectorSource, list[ConnectorConfigField]] = {
             placeholder="U12345678",
             help_text="Used to anchor mention-based alert routing.",
         ),
+        ConnectorConfigField(
+            key="slack_allowed_channels",
+            label="Allowed channels",
+            placeholder="COPS,CPLATFORM",
+            help_text=(
+                "Comma-separated Slack channel IDs allowed for knowledge "
+                "storage. Direct messages are handled separately."
+            ),
+        ),
     ],
     ConnectorSource.GITHUB: [
         ConnectorConfigField(
@@ -207,11 +216,14 @@ class SettingsService:
         return await self.get_profile(source)
 
     async def get_runtime_connector(self, source: ConnectorSource) -> ConnectorAdapter:
-        overrides = await self._store.get_runtime_settings(source.value)
-        runtime_settings = self._base_settings.model_copy(update=overrides)
+        runtime_settings = await self.get_runtime_settings_for_source(source)
         connector = build_connector(source, runtime_settings)
         self._connectors[source] = connector
         return connector
+
+    async def get_runtime_settings_for_source(self, source: ConnectorSource) -> Settings:
+        overrides = await self._store.get_runtime_settings(source.value)
+        return self._base_settings.model_copy(update=overrides)
 
     async def should_process_event(
         self,

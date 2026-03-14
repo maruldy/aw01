@@ -24,6 +24,7 @@ from work_harness.providers.rule_based import RuleBasedChatProvider
 from work_harness.services.audit_log import AuditLog
 from work_harness.services.backfill import BackfillService
 from work_harness.services.harness import HarnessService
+from work_harness.services.knowledge_service import KnowledgeService
 from work_harness.services.knowledge_store import KnowledgeStore
 from work_harness.services.scheduler import SchedulerService
 from work_harness.services.settings_advisor import SettingsAdvisor
@@ -54,8 +55,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if app_settings.openai_api_key
         else RuleBasedChatProvider()
     )
-    supervisor = SupervisorService(chat_provider=provider, connectors=connectors)
-    knowledge_store = KnowledgeStore(app_settings.knowledge_db_path)
+    knowledge_store = KnowledgeStore(
+        app_settings.knowledge_db_path,
+        app_settings.knowledge_chroma_path / app_settings.knowledge_db_path.stem,
+    )
     settings_store = SettingsStore(app_settings.knowledge_db_path)
     webhook_store = WebhookStore(app_settings.knowledge_db_path)
     settings_advisor = SettingsAdvisor(
@@ -67,12 +70,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings_store,
         settings_advisor,
     )
+    knowledge_service = KnowledgeService(knowledge_store, settings_service)
+    supervisor = SupervisorService(
+        chat_provider=provider,
+        connectors=connectors,
+        knowledge_service=knowledge_service,
+    )
     audit_log = AuditLog()
     webhooks = WebhookReceiverService(app_settings, webhook_store)
     harness = HarnessService(
         supervisor,
         connectors,
-        knowledge_store,
+        knowledge_service,
         audit_log,
         settings_service,
     )

@@ -1,19 +1,26 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
+import chromadb
+from chromadb.config import Settings as ChromaSettings
 
 from work_harness.domain.models import AnalysisRecord
 
 
 class KnowledgeStore:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, chroma_path: Path | None = None) -> None:
         self._db_path = db_path
+        self._chroma_path = chroma_path or db_path.parent / f"{db_path.stem}_chroma"
+        self._collection = None
 
     async def initialize(self) -> bool:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._chroma_path.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
             await db.executescript(
                 """
@@ -21,10 +28,17 @@ class KnowledgeStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     analysis_id TEXT UNIQUE NOT NULL,
                     ticket_key TEXT NOT NULL,
+                    source TEXT,
+                    scope_type TEXT,
+                    scope_key TEXT,
+                    actor TEXT,
+                    canonical_url TEXT,
                     core_issue TEXT,
                     keywords TEXT,
                     summary TEXT,
                     final_summary TEXT,
+                    searchable_text TEXT,
+                    storeable BOOLEAN DEFAULT 1,
                     jira_search_results TEXT,
                     confluence_search_results TEXT,
                     cross_reference_results TEXT,
@@ -63,26 +77,60 @@ class KnowledgeStore:
                 );
                 """
             )
+            await self._ensure_column(db, "knowledge_analyses", "source", "TEXT")
+            await self._ensure_column(db, "knowledge_analyses", "scope_type", "TEXT")
+            await self._ensure_column(db, "knowledge_analyses", "scope_key", "TEXT")
+            await self._ensure_column(db, "knowledge_analyses", "actor", "TEXT")
+            await self._ensure_column(db, "knowledge_analyses", "canonical_url", "TEXT")
+            await self._ensure_column(db, "knowledge_analyses", "searchable_text", "TEXT")
+            await self._ensure_column(
+                db,
+                "knowledge_analyses",
+                "storeable",
+                "BOOLEAN DEFAULT 1",
+            )
+            await db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_ka_scope
+                ON knowledge_analyses(source, scope_key, created_at)
+                """
+            )
             await db.commit()
+        client = chromadb.PersistentClient(
+            path=str(self._chroma_path),
+            settings=ChromaSettings(anonymized_telemetry=False),
+        )
+        self._collection = client.get_or_create_collection(name="knowledge_analyses")
         return True
 
     async def store_analysis(self, record: AnalysisRecord) -> str:
+        searchable_text = record.searchable_text or self._default_searchable_text(record)
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(
                 """
                 INSERT OR REPLACE INTO knowledge_analyses (
-                    analysis_id, ticket_key, core_issue, keywords, summary, final_summary,
+                    analysis_id, ticket_key, source, scope_type, scope_key, actor, canonical_url,
+                    core_issue, keywords, summary, final_summary, searchable_text, storeable,
                     jira_search_results, confluence_search_results, cross_reference_results,
                     iterations, response_language, session_id, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                )
                 """,
                 (
                     record.analysis_id,
                     record.ticket_key,
+                    record.source.value if record.source else None,
+                    record.scope_type,
+                    record.scope_key,
+                    record.actor,
+                    record.canonical_url,
                     record.core_issue,
                     json.dumps(record.keywords),
                     record.summary,
                     record.final_summary,
+                    searchable_text,
+                    int(record.storeable),
                     json.dumps(record.jira_search_results),
                     json.dumps(record.confluence_search_results),
                     json.dumps(record.cross_reference_results),
@@ -92,41 +140,134 @@ class KnowledgeStore:
                 ),
             )
             await db.commit()
+        if record.storeable and searchable_text:
+            self._upsert_vector(record, searchable_text)
         return record.analysis_id
 
-    async def search_similar(self, query: str, k: int = 5) -> list[dict]:
+    async def search_similar(
+        self,
+        query: str,
+        k: int = 5,
+        *,
+        source: str | None = None,
+        scope_key: str | None = None,
+    ) -> list[dict]:
         like_query = f"%{query.lower()}%"
+        exact_hits: dict[str, dict[str, Any]] = {}
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
                 """
-                SELECT analysis_id, ticket_key, core_issue, summary, final_summary
+                SELECT analysis_id, ticket_key, source, scope_type, scope_key, actor,
+                       canonical_url, core_issue, summary, final_summary, created_at
                 FROM knowledge_analyses
-                WHERE
-                    lower(core_issue) LIKE ?
-                    OR lower(summary) LIKE ?
-                    OR lower(final_summary) LIKE ?
+                WHERE storeable = 1
+                    AND (? IS NULL OR source = ?)
+                    AND (? IS NULL OR scope_key = ?)
+                    AND (
+                        lower(core_issue) LIKE ?
+                        OR lower(summary) LIKE ?
+                        OR lower(final_summary) LIKE ?
+                        OR lower(searchable_text) LIKE ?
+                    )
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
-                (like_query, like_query, like_query, k),
+                (
+                    source,
+                    source,
+                    scope_key,
+                    scope_key,
+                    like_query,
+                    like_query,
+                    like_query,
+                    like_query,
+                    k,
+                ),
             )
             rows = await cursor.fetchall()
-        return [
-            {
+        for row in rows:
+            exact_hits[row[0]] = {
                 "analysis_id": row[0],
                 "ticket_key": row[1],
-                "core_issue": row[2],
-                "summary": row[3],
-                "final_summary": row[4],
+                "source": row[2],
+                "scope_type": row[3],
+                "scope_key": row[4],
+                "actor": row[5],
+                "canonical_url": row[6],
+                "core_issue": row[7],
+                "summary": row[8],
+                "final_summary": row[9],
+                "created_at": row[10],
+                "match_type": "exact",
+                "score": 1.0,
+            }
+        vector_hits = self._query_vector(query, source=source, scope_key=scope_key, k=k)
+        if not vector_hits:
+            return list(exact_hits.values())[:k]
+
+        hydrated = await self._fetch_by_analysis_ids(list(vector_hits))
+        merged = exact_hits.copy()
+        for analysis_id, hit in hydrated.items():
+            vector_hit = vector_hits.get(analysis_id, {})
+            existing = merged.get(analysis_id)
+            score = vector_hit.get("score", 0.0)
+            match_type = "exact+vector" if existing else "vector"
+            payload = {
+                **hit,
+                "match_type": match_type,
+                "score": max(existing["score"], score) if existing else score,
+            }
+            if existing:
+                payload["score"] = max(existing["score"], score)
+            merged[analysis_id] = payload
+        return sorted(
+            merged.values(),
+            key=lambda item: (item.get("score", 0.0), item.get("created_at", "")),
+            reverse=True,
+        )[:k]
+
+    async def _fetch_by_analysis_ids(
+        self,
+        analysis_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        if not analysis_ids:
+            return {}
+        placeholders = ",".join("?" for _ in analysis_ids)
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                f"""
+                SELECT analysis_id, ticket_key, source, scope_type, scope_key, actor,
+                       canonical_url, core_issue, summary, final_summary, created_at
+                FROM knowledge_analyses
+                WHERE
+                    analysis_id IN ({placeholders})
+                """,
+                analysis_ids,
+            )
+            rows = await cursor.fetchall()
+        return {
+            row[0]: {
+                "analysis_id": row[0],
+                "ticket_key": row[1],
+                "source": row[2],
+                "scope_type": row[3],
+                "scope_key": row[4],
+                "actor": row[5],
+                "canonical_url": row[6],
+                "core_issue": row[7],
+                "summary": row[8],
+                "final_summary": row[9],
+                "created_at": row[10],
             }
             for row in rows
-        ]
+        }
 
     async def get_recent(self, limit: int = 10) -> list[dict]:
         async with aiosqlite.connect(self._db_path) as db:
             cursor = await db.execute(
                 """
-                SELECT analysis_id, ticket_key, summary, final_summary, created_at
+                SELECT analysis_id, ticket_key, source, scope_key, summary,
+                       final_summary, created_at
                 FROM knowledge_analyses
                 ORDER BY created_at DESC
                 LIMIT ?
@@ -138,9 +279,11 @@ class KnowledgeStore:
             {
                 "analysis_id": row[0],
                 "ticket_key": row[1],
-                "summary": row[2],
-                "final_summary": row[3],
-                "created_at": row[4],
+                "source": row[2],
+                "scope_key": row[3],
+                "summary": row[4],
+                "final_summary": row[5],
+                "created_at": row[6],
             }
             for row in rows
         ]
@@ -166,3 +309,94 @@ class KnowledgeStore:
             "avg_iterations": float(avg_iterations or 0),
             "by_month": [{"month": row[0], "count": row[1]} for row in by_month],
         }
+
+    async def _ensure_column(
+        self,
+        db: aiosqlite.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        cursor = await db.execute(f"PRAGMA table_info({table})")
+        existing_columns = {row[1] for row in await cursor.fetchall()}
+        if column not in existing_columns:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _upsert_vector(self, record: AnalysisRecord, searchable_text: str) -> None:
+        if self._collection is None:
+            return
+        self._collection.upsert(
+            ids=[record.analysis_id],
+            documents=[searchable_text],
+            embeddings=[self._embed_text(searchable_text)],
+            metadatas=[
+                {
+                    "source": record.source.value if record.source else "",
+                    "scope_key": record.scope_key or "",
+                    "ticket_key": record.ticket_key,
+                    "storeable": bool(record.storeable),
+                }
+            ],
+        )
+
+    def _query_vector(
+        self,
+        query: str,
+        *,
+        source: str | None,
+        scope_key: str | None,
+        k: int,
+    ) -> dict[str, dict[str, Any]]:
+        if self._collection is None:
+            return {}
+        if self._collection.count() == 0:
+            return {}
+        where = self._build_where(source, scope_key)
+        result = self._collection.query(
+            query_embeddings=[self._embed_text(query)],
+            n_results=k,
+            where=where,
+            include=["distances", "metadatas"],
+        )
+        ids = result.get("ids", [[]])[0]
+        distances = result.get("distances", [[]])[0]
+        hits: dict[str, dict[str, Any]] = {}
+        for analysis_id, distance in zip(ids, distances, strict=False):
+            hits[analysis_id] = {"score": 1 / (1 + float(distance))}
+        return hits
+
+    def _build_where(
+        self,
+        source: str | None,
+        scope_key: str | None,
+    ) -> dict[str, Any] | None:
+        clauses = []
+        if source:
+            clauses.append({"source": source})
+        if scope_key:
+            clauses.append({"scope_key": scope_key})
+        if not clauses:
+            return None
+        if len(clauses) == 1:
+            return clauses[0]
+        return {"$and": clauses}
+
+    def _default_searchable_text(self, record: AnalysisRecord) -> str:
+        return " ".join(
+            part
+            for part in [
+                record.core_issue,
+                record.summary,
+                record.final_summary,
+                " ".join(record.keywords),
+            ]
+            if part
+        )[:2000]
+
+    def _embed_text(self, text: str, dimensions: int = 96) -> list[float]:
+        vector = [0.0] * dimensions
+        for token in text.lower().split():
+            slot = int(hashlib.sha256(token.encode()).hexdigest(), 16) % dimensions
+            vector[slot] += 1.0
+        norm = sum(value * value for value in vector) ** 0.5 or 1.0
+        return [value / norm for value in vector]

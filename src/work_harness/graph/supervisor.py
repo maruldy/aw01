@@ -14,6 +14,7 @@ from work_harness.domain.models import (
 )
 from work_harness.providers.base import ChatModelProvider
 from work_harness.providers.rule_based import RuleBasedChatProvider
+from work_harness.services.knowledge_service import KnowledgeService
 
 
 class SupervisorState(TypedDict, total=False):
@@ -30,9 +31,11 @@ class SupervisorService:
         self,
         chat_provider: ChatModelProvider | None = None,
         connectors: dict | None = None,
+        knowledge_service: KnowledgeService | None = None,
     ) -> None:
         self._chat_provider = chat_provider or RuleBasedChatProvider()
         self._connectors = connectors or {}
+        self._knowledge_service = knowledge_service
         self._graph = self._build_graph()
 
     def _build_graph(self):
@@ -61,7 +64,10 @@ class SupervisorService:
     async def _gather_context(self, state: SupervisorState) -> SupervisorState:
         event = state["event"]
         connector = self._connectors.get(event.source)
-        context = await connector.fetch_context(event) if connector else {}
+        if self._knowledge_service is not None:
+            context = await self._knowledge_service.gather_context(event, connector)
+        else:
+            context = await connector.fetch_context(event) if connector else {}
         return {"context": context}
 
     async def _build_proposal(self, state: SupervisorState) -> SupervisorState:
@@ -103,7 +109,7 @@ class SupervisorService:
             suggested_action=proposal_data["suggested_action"],
             priority=proposal_data["priority"],
             recommended_agent=proposal_data["recommended_agent"],
-            context_notes=[f"Route selected: {state['route']}"],
+            context_notes=self._build_context_notes(state),
         )
         work_item = WorkItem(
             source=event.source,
@@ -130,3 +136,12 @@ class SupervisorService:
         result = await self._graph.ainvoke({"event": event})
         return GraphResult(work_item=result["work_item"], run=result["run"])
 
+    def _build_context_notes(self, state: SupervisorState) -> list[str]:
+        notes = [f"Route selected: {state['route']}"]
+        context = state.get("context", {})
+        knowledge_hits = context.get("knowledge_hits", []) if isinstance(context, dict) else []
+        for hit in knowledge_hits[:2]:
+            notes.append(f"Similar knowledge: {hit['summary']}")
+        if isinstance(context, dict) and context.get("knowledge_mode") == "remote_fallback":
+            notes.append("No local knowledge hit. Used scoped remote context.")
+        return notes
