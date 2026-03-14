@@ -29,7 +29,10 @@ CONFIG_FIELD_DEFINITIONS: dict[ConnectorSource, list[ConnectorConfigField]] = {
             key="jira_api_token",
             label="Jira PAT",
             placeholder="Enter a read-only personal access token",
-            help_text="Prefer a token limited to read access for backfill and issue inspection.",
+            help_text=(
+                "Prefer a token limited to read access for issue inspection "
+                "and on-demand knowledge sync."
+            ),
             required=True,
             sensitive=True,
         ),
@@ -60,7 +63,7 @@ CONFIG_FIELD_DEFINITIONS: dict[ConnectorSource, list[ConnectorConfigField]] = {
             key="confluence_spaces",
             label="Allowed spaces",
             placeholder="ENG,OPS",
-            help_text="Comma-separated spaces to include in alerts and backfill.",
+            help_text="Comma-separated spaces allowed for alerts and knowledge sync.",
         ),
     ],
     ConnectorSource.SLACK: [

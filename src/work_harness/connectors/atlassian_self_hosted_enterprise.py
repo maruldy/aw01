@@ -61,7 +61,7 @@ class JiraSelfHostedEnterpriseAdapter(ConnectorAdapter):
                     if missing_fields
                     else CapabilityStatus.UNKNOWN
                 ),
-                detail="Run limited JQL searches for enrichment and backfill.",
+                detail="Run limited JQL searches for enrichment and local knowledge lookup.",
             ),
         ]
 
@@ -283,7 +283,7 @@ class ConfluenceSelfHostedEnterpriseAdapter(ConnectorAdapter):
                     if missing_fields
                     else CapabilityStatus.UNKNOWN
                 ),
-                detail="Read configured spaces for backfill and event context.",
+                detail="Read configured spaces for event context and knowledge sync.",
             ),
             ConnectorCapability(
                 key="content_read",

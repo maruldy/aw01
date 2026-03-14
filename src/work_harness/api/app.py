@@ -81,7 +81,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     harness = HarnessService(
         supervisor,
         connectors,
-        knowledge_service,
         audit_log,
         settings_service,
     )
@@ -106,9 +105,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.knowledge_store = knowledge_store
         app.state.settings_service = settings_service
         app.state.webhooks = webhooks
+        app.state.knowledge_service = knowledge_service
         await ensure_runtime(app)
-        if app_settings.auto_backfill:
-            await backfill.trigger()
         yield
         scheduler.stop()
 
@@ -120,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.knowledge_store = knowledge_store
     app.state.settings_service = settings_service
     app.state.webhooks = webhooks
+    app.state.knowledge_service = knowledge_service
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -285,6 +284,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request.headers,
             payload,
         )
+        knowledge_payload = {
+            "knowledge_action": "skip",
+            "knowledge_reason": "Rejected or not evaluated.",
+        }
+        if verification.accepted:
+            connector_source = ConnectorSource(provider.value)
+            connector = await app.state.settings_service.get_runtime_connector(
+                connector_source
+            )
+            event = await connector.handle_webhook(payload)
+            sync_result = await app.state.knowledge_service.sync_webhook_event(
+                event,
+                connector,
+            )
+            knowledge_payload = {
+                "knowledge_action": sync_result.action.value,
+                "knowledge_reason": sync_result.reason,
+                "knowledge_record_key": sync_result.record_key,
+            }
         response_payload = {
             "accepted": verification.accepted,
             "verified": verification.verified,
@@ -292,6 +310,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "event_type": envelope.event_type,
             "status": envelope.status,
             "reason": verification.verification_reason,
+            **knowledge_payload,
         }
         return response_payload, verification.status_code
 
@@ -314,6 +333,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         if payload.get("type") == "url_verification" and verification.accepted:
             return JSONResponse(status_code=200, content={"challenge": payload["challenge"]})
+        knowledge_payload = {
+            "knowledge_action": "skip",
+            "knowledge_reason": "Rejected or not evaluated.",
+        }
+        if verification.accepted:
+            connector = await app.state.settings_service.get_runtime_connector(
+                ConnectorSource.SLACK
+            )
+            event = await connector.handle_webhook(payload)
+            sync_result = await app.state.knowledge_service.sync_webhook_event(
+                event,
+                connector,
+            )
+            knowledge_payload = {
+                "knowledge_action": sync_result.action.value,
+                "knowledge_reason": sync_result.reason,
+                "knowledge_record_key": sync_result.record_key,
+            }
         response_payload = {
             "accepted": verification.accepted,
             "verified": verification.verified,
@@ -321,6 +358,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "event_type": envelope.event_type,
             "status": envelope.status,
             "reason": verification.verification_reason,
+            **knowledge_payload,
         }
         return JSONResponse(status_code=verification.status_code, content=response_payload)
 

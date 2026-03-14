@@ -7,7 +7,7 @@ export function KnowledgePage() {
   const [stats, setStats] = useState<{ total: number; avg_iterations: number; by_month: { month: string; count: number }[] } | null>(null);
   const [recent, setRecent] = useState<Array<Record<string, string>>>([]);
   const [audit, setAudit] = useState<Array<Record<string, unknown>>>([]);
-  const [backfillState, setBackfillState] = useState<string>("idle");
+  const [syncState, setSyncState] = useState<string>("disabled");
 
   useEffect(() => {
     async function load() {
@@ -20,7 +20,7 @@ export function KnowledgePage() {
       setStats(nextStats);
       setRecent(nextRecent.items);
       setAudit(nextAudit.items);
-      setBackfillState(String(health.backfill.state ?? "idle"));
+      setSyncState(String(health.backfill.state ?? "disabled"));
     }
     void load();
   }, []);
@@ -30,7 +30,7 @@ export function KnowledgePage() {
       <section className="grid gap-4 md:grid-cols-3">
         <StatCard label="Stored analyses" value={stats?.total ?? 0} hint="Accumulated event and decision context." />
         <StatCard label="Average iterations" value={(stats?.avg_iterations ?? 0).toFixed(1)} hint="Mean synthesis iterations per stored analysis." />
-        <StatCard label="Backfill state" value={backfillState} hint="Historical backfill pipeline status." />
+        <StatCard label="Historical sync" value={syncState} hint="Bulk startup sync is disabled. Knowledge grows from webhook lifecycle events." />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">

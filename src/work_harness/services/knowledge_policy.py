@@ -133,11 +133,12 @@ def _evaluate_slack(event: ActivityEvent, settings: Settings) -> StoreabilityDec
         if storeable
         else "Slack message channel is outside the configured allowlist."
     )
+    record_key = _slack_record_key(slack_event, event.external_id)
     return StoreabilityDecision(
         storeable=storeable,
         scope_type="channel",
         scope_key=str(channel) if channel else None,
-        record_key=event.external_id,
+        record_key=record_key,
         canonical_url=None,
         reason=reason,
     )
@@ -202,3 +203,16 @@ def _first_non_empty(*values: Any) -> str | None:
 
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
+
+
+def _slack_record_key(slack_event: dict[str, Any], fallback: str) -> str:
+    channel = _first_non_empty(slack_event.get("channel"))
+    timestamp = _first_non_empty(
+        slack_event.get("thread_ts"),
+        slack_event.get("ts"),
+        slack_event.get("deleted_ts"),
+        _as_dict(slack_event.get("previous_message")).get("ts"),
+    )
+    if channel and timestamp:
+        return f"{channel}:{timestamp}"
+    return fallback

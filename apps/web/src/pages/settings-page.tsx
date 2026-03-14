@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import {
   getProfiles,
   getSchedulerJobs,
-  triggerBackfill,
   updateConnectorConfig,
   updateSubscriptions,
   validateProfile
@@ -60,10 +59,6 @@ export function SettingsPage() {
     }));
   }
 
-  async function handleBackfill() {
-    await triggerBackfill();
-  }
-
   async function handleSaveConfig(source: string) {
     const result = await updateConnectorConfig(source, draftConfigValues[source] ?? {});
     setProfiles((previous) => previous.map((profile) => (profile.source === source ? result : profile)));
@@ -116,19 +111,11 @@ export function SettingsPage() {
   return (
     <div className="space-y-6">
       <section className="panel">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="eyebrow">Setup wizard</p>
-            <h1 className="panel-title">Validate enterprise connectors</h1>
-          </div>
-          <button
-            type="button"
-            onClick={handleBackfill}
-            className="rounded-[18px] bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px]"
-          >
-            Trigger backfill dry run
-          </button>
-        </div>
+        <p className="eyebrow">Setup wizard</p>
+        <h1 className="panel-title">Validate enterprise connectors</h1>
+        <p className="mt-3 text-sm text-ink/70">
+          Knowledge is synced from webhook-driven lifecycle events. Startup backfill is disabled.
+        </p>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">

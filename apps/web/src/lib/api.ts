@@ -83,7 +83,3 @@ export async function updateConnectorConfig(source: string, values: Record<strin
     body: JSON.stringify({ values })
   });
 }
-
-export async function triggerBackfill() {
-  return request<Record<string, unknown>>("/backfill/trigger", { method: "POST" });
-}

@@ -144,6 +144,19 @@ class KnowledgeStore:
             self._upsert_vector(record, searchable_text)
         return record.analysis_id
 
+    async def delete_analysis(self, analysis_id: str) -> None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                DELETE FROM knowledge_analyses
+                WHERE analysis_id = ?
+                """,
+                (analysis_id,),
+            )
+            await db.commit()
+        if self._collection is not None:
+            self._collection.delete(ids=[analysis_id])
+
     async def search_similar(
         self,
         query: str,

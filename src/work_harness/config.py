@@ -43,9 +43,6 @@ class Settings(BaseSettings):
     knowledge_chroma_path: Path = Field(default=Path("./data/chroma"))
     managed_workspace_root: Path = Field(default=Path("./.workspaces"))
 
-    auto_backfill: bool = False
-    backfill_months_back: int = 6
-
     daily_delta_scan_hour: int = 3
     weekly_digest_day: str = "mon"
     weekly_digest_hour: int = 9

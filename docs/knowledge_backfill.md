@@ -1,63 +1,49 @@
-# Knowledge Backfill Flow
+# Knowledge Sync Policy
 
 ## Purpose
 
-The backfill flow exists to avoid an empty knowledge base on first deployment. Instead of waiting for new live activity, the system should scan recent enterprise data, normalize it, summarize it, and store it so later agent runs can use similar past cases as context.
+The harness no longer seeds knowledge automatically when the server starts.
+
+Knowledge now grows from webhook-driven lifecycle events and scoped on-demand retrieval.
 
 ## Current implementation
 
-The current code path lives in [backfill.py](../src/work_harness/services/backfill.py). It is intentionally a safe dry run:
-
-1. Mark backfill as `running`
-2. Create one synthetic `AnalysisRecord`
-3. Store it in SQLite through `KnowledgeStore`
-4. Mark backfill as `completed`
-
-This proves the orchestration, scheduler registration, and storage path end to end without requiring live enterprise credentials during local development.
+The current status path still lives in [backfill.py](../src/work_harness/services/backfill.py), but it is disabled and does not write to the knowledge store.
 
 ## Current operating policy
 
-Backfill is not the default knowledge strategy.
+Bulk backfill is not the default knowledge strategy.
 
 The implemented runtime now prefers:
 
 1. local scoped retrieval from SQLite + ChromaDB
 2. scoped single-resource remote fallback on a local miss
-3. storeability checks before persistence
+3. webhook-driven upsert or delete when a lifecycle event marks a useful knowledge boundary
+4. storeability checks before persistence
 
 That keeps the system safe for internal services while still letting the harness accumulate useful knowledge over time.
-
-## Target production flow
-
-In production, the intended backfill pipeline is:
-
-1. Validate connector credentials for Jira, Confluence, Slack, and GitHub
-2. Pull historical data for a bounded time range such as the last 3-6 months
-3. Normalize vendor-specific payloads into internal activity records
-4. Run lightweight LLM analysis to extract issue summaries, keywords, owners, and likely next actions
-5. Persist structured records into SQLite and searchable summaries into the vector layer
-6. Record checkpoints so the job can resume after interruptions
 
 ## Workflow diagram
 
 ```mermaid
 flowchart TD
-    A["Backfill triggered"] --> B["Validate connector credentials"]
-    B --> C["Fetch historical Jira/Confluence/Slack/GitHub data"]
-    C --> D["Normalize into internal activity records"]
-    D --> E["Run lightweight analysis"]
-    E --> F["Store structured rows in SQLite"]
-    E --> G["Store summaries for similarity search"]
-    F --> H["Update checkpoint + progress"]
-    G --> H
-    H --> I{"More batches?"}
-    I -->|Yes| C
-    I -->|No| J["Backfill completed"]
+    A["Webhook arrives"] --> B["Verify request and log delivery"]
+    B --> C["Normalize event"]
+    C --> D["Apply knowledge mutation policy"]
+    D -->|skip| E["No knowledge mutation"]
+    D -->|upsert| F["Check local scope policy"]
+    D -->|delete| G["Delete from SQLite and ChromaDB"]
+    F -->|blocked| E
+    F -->|allowed| H["Fetch one scoped remote resource if needed"]
+    H --> I["Summarize and upsert SQLite + ChromaDB"]
 ```
 
-## Why this matters in the work harness
+## Historical data
 
-- The inbox can explain similar past incidents instead of starting from zero.
-- Supervisor routing gets better context for proposals and prioritization.
-- Human decisions become reusable organizational memory rather than one-off actions.
-- Daily delta scans can stay small because the cold-start bulk load already populated the baseline.
+Older data should not be bulk-loaded automatically.
+
+The safer future approach is a selective hydrate flow:
+
+1. the operator chooses an allowlisted Jira project, Confluence space, Slack channel, or GitHub repository
+2. the harness fetches a bounded recent slice for that single scope
+3. the same storeability and sanitization rules are applied before persistence

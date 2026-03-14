@@ -20,7 +20,6 @@ from work_harness.domain.models import (
 from work_harness.graph.supervisor import SupervisorService
 from work_harness.repositories.memory import InMemoryRunRepository, InMemoryWorkItemRepository
 from work_harness.services.audit_log import AuditLog
-from work_harness.services.knowledge_service import KnowledgeService
 from work_harness.services.settings_service import SettingsService
 
 
@@ -48,13 +47,11 @@ class HarnessService:
         self,
         supervisor: SupervisorService,
         connectors: dict[ConnectorSource, ConnectorAdapter],
-        knowledge_service: KnowledgeService,
         audit_log: AuditLog,
         settings_service: SettingsService,
     ) -> None:
         self._supervisor = supervisor
         self._connectors = connectors
-        self._knowledge_service = knowledge_service
         self._audit_log = audit_log
         self._settings_service = settings_service
         self._work_items = InMemoryWorkItemRepository()
@@ -91,18 +88,6 @@ class HarnessService:
         result = await self._supervisor.handle_event(event)
         await self._work_items.upsert(result.work_item)
         await self._runs.upsert(result.run)
-        record = await self._knowledge_service.build_analysis_record(
-            event,
-            result.work_item,
-            result.run,
-        )
-        if record is not None:
-            await self._knowledge_service.store_analysis(record)
-        else:
-            await self._audit_log.append(
-                "knowledge.skipped",
-                {"source": source.value, "external_id": event.external_id},
-            )
         await self._audit_log.append("work_item.created", result.work_item.model_dump(mode="json"))
         await self._bus.publish(
             result.run.thread_id,

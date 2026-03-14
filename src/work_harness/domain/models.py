@@ -42,6 +42,12 @@ class RunStatus(str, Enum):
     COMPLETED = "completed"
 
 
+class KnowledgeSyncAction(str, Enum):
+    UPSERT = "upsert"
+    DELETE = "delete"
+    SKIP = "skip"
+
+
 class CapabilityStatus(str, Enum):
     VERIFIED = "verified"
     BLOCKED = "blocked"
@@ -215,6 +221,14 @@ class WebhookProviderMetadata(BaseModel):
     verification_mode: str
     recommended_events: list[str] = Field(default_factory=list)
     setup_notes: list[str] = Field(default_factory=list)
+
+
+class KnowledgeSyncResult(BaseModel):
+    action: KnowledgeSyncAction
+    record_key: str | None = None
+    analysis_id: str | None = None
+    scope_key: str | None = None
+    reason: str
 
 
 class ToolInvocation(BaseModel):
