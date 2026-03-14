@@ -1,0 +1,2 @@
+"""Safety harness components."""
+
