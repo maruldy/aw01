@@ -13,7 +13,7 @@ from work_harness.domain.models import (
     DecisionPayload,
     DecisionType,
     ExecutionRun,
-    GraphResult,
+    IngressResult,
     RunStatus,
     WorkItem,
     WorkItemStatus,
@@ -22,6 +22,7 @@ from work_harness.graph.supervisor import SupervisorService
 from work_harness.repositories.memory import InMemoryRunRepository, InMemoryWorkItemRepository
 from work_harness.services.audit_log import AuditLog
 from work_harness.services.knowledge_store import KnowledgeStore
+from work_harness.services.settings_service import SettingsService
 
 
 class RunEventBus:
@@ -50,21 +51,43 @@ class HarnessService:
         connectors: dict[ConnectorSource, ConnectorAdapter],
         knowledge_store: KnowledgeStore,
         audit_log: AuditLog,
+        settings_service: SettingsService,
     ) -> None:
         self._supervisor = supervisor
         self._connectors = connectors
         self._knowledge_store = knowledge_store
         self._audit_log = audit_log
+        self._settings_service = settings_service
         self._work_items = InMemoryWorkItemRepository()
         self._runs = InMemoryRunRepository()
         self._bus = RunEventBus()
 
-    async def ingest_event(self, source: ConnectorSource, payload: dict[str, Any]) -> GraphResult:
+    async def ingest_event(self, source: ConnectorSource, payload: dict[str, Any]) -> IngressResult:
         connector = self._connectors.get(source)
         if connector:
             event = await connector.handle_webhook(payload)
         else:
             event = ActivityEvent(source=source, **payload)
+
+        should_process, subscription_key, reason = (
+            await self._settings_service.should_process_event(source, event)
+        )
+        if not should_process:
+            await self._audit_log.append(
+                "work_item.skipped",
+                {
+                    "source": source.value,
+                    "subscription_key": subscription_key,
+                    "reason": reason,
+                    "external_id": event.external_id,
+                },
+            )
+            return IngressResult(
+                processed=False,
+                source=source,
+                subscription_key=subscription_key,
+                reason=reason,
+            )
 
         result = await self._supervisor.handle_event(event)
         await self._work_items.upsert(result.work_item)
@@ -84,7 +107,14 @@ class HarnessService:
             result.run.thread_id,
             {"type": "work_item_created", "work_item_id": result.work_item.id},
         )
-        return result
+        return IngressResult(
+            processed=True,
+            source=source,
+            subscription_key=subscription_key,
+            reason=reason,
+            work_item=result.work_item,
+            run=result.run,
+        )
 
     async def list_work_items(self) -> list[WorkItem]:
         items = await self._work_items.list()

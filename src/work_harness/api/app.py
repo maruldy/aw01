@@ -3,14 +3,21 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from work_harness.config import Settings
 from work_harness.connectors.factory import build_connectors
-from work_harness.domain.models import ConnectorProfile, ConnectorSource, DecisionPayload
+from work_harness.domain.models import (
+    ConnectorConfigUpdate,
+    ConnectorSource,
+    DecisionPayload,
+    SubscriptionPreferenceUpdate,
+    WebhookProvider,
+)
 from work_harness.graph.supervisor import SupervisorService
 from work_harness.providers.openai_provider import OpenAIChatProvider
 from work_harness.providers.rule_based import RuleBasedChatProvider
@@ -19,6 +26,11 @@ from work_harness.services.backfill import BackfillService
 from work_harness.services.harness import HarnessService
 from work_harness.services.knowledge_store import KnowledgeStore
 from work_harness.services.scheduler import SchedulerService
+from work_harness.services.settings_advisor import SettingsAdvisor
+from work_harness.services.settings_service import SettingsService
+from work_harness.services.settings_store import SettingsStore
+from work_harness.services.webhook_service import WebhookReceiverService
+from work_harness.services.webhook_store import WebhookStore
 
 
 class IngressRequest(BaseModel):
@@ -44,8 +56,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     supervisor = SupervisorService(chat_provider=provider, connectors=connectors)
     knowledge_store = KnowledgeStore(app_settings.knowledge_db_path)
+    settings_store = SettingsStore(app_settings.knowledge_db_path)
+    webhook_store = WebhookStore(app_settings.knowledge_db_path)
+    settings_advisor = SettingsAdvisor(
+        provider if app_settings.openai_api_key else None
+    )
+    settings_service = SettingsService(
+        app_settings,
+        connectors,
+        settings_store,
+        settings_advisor,
+    )
     audit_log = AuditLog()
-    harness = HarnessService(supervisor, connectors, knowledge_store, audit_log)
+    webhooks = WebhookReceiverService(app_settings, webhook_store)
+    harness = HarnessService(
+        supervisor,
+        connectors,
+        knowledge_store,
+        audit_log,
+        settings_service,
+    )
     backfill = BackfillService(knowledge_store)
     scheduler = SchedulerService(app_settings, backfill)
 
@@ -53,6 +83,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if getattr(app.state, "runtime_ready", False):
             return
         await knowledge_store.initialize()
+        await settings_store.initialize()
+        await webhook_store.initialize()
         scheduler.start()
         app.state.runtime_ready = True
 
@@ -63,6 +95,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.backfill = backfill
         app.state.scheduler = scheduler
         app.state.knowledge_store = knowledge_store
+        app.state.settings_service = settings_service
+        app.state.webhooks = webhooks
         await ensure_runtime(app)
         if app_settings.auto_backfill:
             await backfill.trigger()
@@ -75,6 +109,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.backfill = backfill
     app.state.scheduler = scheduler
     app.state.knowledge_store = knowledge_store
+    app.state.settings_service = settings_service
+    app.state.webhooks = webhooks
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -99,8 +135,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unknown source") from exc
         result = await app.state.harness.ingest_event(connector_source, request.model_dump())
         return {
-            "work_item": result.work_item.model_dump(mode="json"),
-            "run": result.run.model_dump(mode="json"),
+            "processed": result.processed,
+            "subscription_key": result.subscription_key,
+            "reason": result.reason,
+            "work_item": (
+                result.work_item.model_dump(mode="json")
+                if result.work_item
+                else None
+            ),
+            "run": (
+                result.run.model_dump(mode="json")
+                if result.run
+                else None
+            ),
         }
 
     @app.get("/work-items")
@@ -172,26 +219,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/settings/profiles")
     async def settings_profiles() -> dict[str, Any]:
         await ensure_runtime(app)
-        profiles = []
-        for source, _connector in connectors.items():
-            mode = (
-                "self_hosted_enterprise"
-                if source in {ConnectorSource.JIRA, ConnectorSource.CONFLUENCE}
-                else "cloud_enterprise"
-            )
-            validation = await connectors[source].validate()
-            profiles.append(
-                ConnectorProfile(
-                    name=source.value,
-                    source=source,
-                    mode=mode,
-                    settings={},
-                    configured=bool(validation["configured"]),
-                    missing_fields=list(validation["missing_fields"]),
-                    message=str(validation["message"]),
-                ).model_dump(mode="json")
-            )
-        return {"profiles": profiles}
+        profiles = await app.state.settings_service.list_profiles()
+        return {"profiles": [profile.model_dump(mode="json") for profile in profiles]}
 
     @app.post("/settings/validate/{source}")
     async def validate_connector(source: str) -> dict[str, Any]:
@@ -200,7 +229,122 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             connector_source = ConnectorSource(source)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Unknown source") from exc
-        connector = connectors[connector_source]
-        return await connector.validate()
+        profile = await app.state.settings_service.get_profile(connector_source)
+        return profile.model_dump(mode="json")
+
+    @app.post("/settings/subscriptions/{source}")
+    async def update_subscriptions(
+        source: str,
+        payload: SubscriptionPreferenceUpdate,
+    ) -> dict[str, Any]:
+        await ensure_runtime(app)
+        try:
+            connector_source = ConnectorSource(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Unknown source") from exc
+        profile = await app.state.settings_service.update_selected_event_keys(
+            connector_source,
+            payload.selected_event_keys,
+        )
+        return profile.model_dump(mode="json")
+
+    @app.post("/settings/config/{source}")
+    async def update_config(
+        source: str,
+        payload: ConnectorConfigUpdate,
+    ) -> dict[str, Any]:
+        await ensure_runtime(app)
+        try:
+            connector_source = ConnectorSource(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Unknown source") from exc
+        profile = await app.state.settings_service.update_runtime_settings(
+            connector_source,
+            payload.values,
+        )
+        return profile.model_dump(mode="json")
+
+    async def _receive_webhook(
+        provider: WebhookProvider,
+        request: Request,
+    ) -> tuple[dict[str, Any], int]:
+        raw_body = await request.body()
+        payload = await request.json()
+        verification, envelope = await app.state.webhooks.receive(
+            provider,
+            raw_body,
+            request.headers,
+            payload,
+        )
+        response_payload = {
+            "accepted": verification.accepted,
+            "verified": verification.verified,
+            "delivery_id": envelope.delivery_id,
+            "event_type": envelope.event_type,
+            "status": envelope.status,
+            "reason": verification.verification_reason,
+        }
+        return response_payload, verification.status_code
+
+    @app.post("/webhooks/github")
+    async def receive_github_webhook(request: Request) -> JSONResponse:
+        await ensure_runtime(app)
+        payload, status_code = await _receive_webhook(WebhookProvider.GITHUB, request)
+        return JSONResponse(status_code=status_code, content=payload)
+
+    @app.post("/webhooks/slack/events")
+    async def receive_slack_webhook(request: Request) -> JSONResponse:
+        await ensure_runtime(app)
+        raw_body = await request.body()
+        payload = await request.json()
+        verification, envelope = await app.state.webhooks.receive(
+            WebhookProvider.SLACK,
+            raw_body,
+            request.headers,
+            payload,
+        )
+        if payload.get("type") == "url_verification" and verification.accepted:
+            return JSONResponse(status_code=200, content={"challenge": payload["challenge"]})
+        response_payload = {
+            "accepted": verification.accepted,
+            "verified": verification.verified,
+            "delivery_id": envelope.delivery_id,
+            "event_type": envelope.event_type,
+            "status": envelope.status,
+            "reason": verification.verification_reason,
+        }
+        return JSONResponse(status_code=verification.status_code, content=response_payload)
+
+    @app.post("/webhooks/jira")
+    async def receive_jira_webhook(request: Request) -> JSONResponse:
+        await ensure_runtime(app)
+        payload, status_code = await _receive_webhook(WebhookProvider.JIRA, request)
+        return JSONResponse(status_code=status_code, content=payload)
+
+    @app.post("/webhooks/confluence")
+    async def receive_confluence_webhook(request: Request) -> JSONResponse:
+        await ensure_runtime(app)
+        payload, status_code = await _receive_webhook(WebhookProvider.CONFLUENCE, request)
+        return JSONResponse(status_code=status_code, content=payload)
+
+    @app.get("/webhooks/deliveries")
+    async def list_webhook_deliveries(
+        provider: str | None = None,
+        verified: bool | None = None,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        await ensure_runtime(app)
+        webhook_provider = None
+        if provider is not None:
+            try:
+                webhook_provider = WebhookProvider(provider)
+            except ValueError as exc:
+                raise HTTPException(status_code=404, detail="Unknown webhook provider") from exc
+        items = await app.state.webhooks.list_deliveries(
+            provider=webhook_provider,
+            verified=verified,
+            limit=max(1, min(limit, 100)),
+        )
+        return {"items": [item.model_dump(mode="json") for item in items]}
 
     return app

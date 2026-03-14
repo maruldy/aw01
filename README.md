@@ -30,4 +30,4 @@ The frontend runs on `http://localhost:5173` and the backend on `http://localhos
 - MCP is not required by the core runtime. SaaS and self-hosted system access goes through typed connector adapters; local side effects go through an allowlisted CLI registry.
 - The UI is push-first: agents create work items, and the operator responds with `accept`, `reject`, `advise`, or `defer`.
 
-Backfill details are documented in [knowledge_backfill.md](docs/knowledge_backfill.md).
+Backfill details are documented in [knowledge_backfill.md](docs/knowledge_backfill.md). Webhook setup is documented in [webhook_setup.md](docs/webhook_setup.md). The hybrid knowledge policy is documented in [knowledge_strategy.md](docs/knowledge_strategy.md).

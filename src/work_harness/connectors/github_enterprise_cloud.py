@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import httpx
+
 from work_harness.config import Settings
 from work_harness.connectors.base import ConnectorAdapter
-from work_harness.domain.models import ActivityEvent, ConnectorSource
+from work_harness.domain.models import (
+    ActivityEvent,
+    CapabilityStatus,
+    ConnectorCapability,
+    ConnectorSource,
+    EventSubscription,
+)
 
 
 class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
@@ -17,45 +25,160 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
             missing_fields.append("GITHUB_TOKEN")
         if not self._settings.github_repository:
             missing_fields.append("GITHUB_REPOSITORY")
-        return {
-            "ok": not missing_fields,
-            "configured": not missing_fields,
-            "source": self.source.value,
-            "missing_fields": missing_fields,
-            "message": (
-                "GitHub Enterprise Cloud is connected."
-                if not missing_fields
-                else (
-                    "Connect GitHub Enterprise Cloud to turn "
-                    "reviews and PR requests into managed work."
-                )
+
+        capabilities = [
+            ConnectorCapability(
+                key="auth",
+                label="Authenticate to GitHub",
+                status=(
+                    CapabilityStatus.MISSING_CONFIG
+                    if missing_fields
+                    else CapabilityStatus.UNKNOWN
+                ),
+                detail="Validate the GitHub token against the REST API.",
             ),
+            ConnectorCapability(
+                key="repo_read",
+                label="Read repository",
+                status=(
+                    CapabilityStatus.MISSING_CONFIG
+                    if missing_fields
+                    else CapabilityStatus.UNKNOWN
+                ),
+                detail="Confirm read access to the configured repository.",
+            ),
+            ConnectorCapability(
+                key="pull_request_read",
+                label="Read pull requests",
+                status=(
+                    CapabilityStatus.MISSING_CONFIG
+                    if missing_fields
+                    else CapabilityStatus.UNKNOWN
+                ),
+                detail="Confirm read access to pull request metadata.",
+            ),
+        ]
+
+        identity = None
+        evidence: list[str] = []
+        if not missing_fields:
+            headers = {
+                "Authorization": f"Bearer {self._settings.github_token}",
+                "Accept": "application/vnd.github+json",
+            }
+            base_url = self._settings.github_base_url.rstrip("/")
+            repository = self._settings.github_repository
+            try:
+                async with httpx.AsyncClient(
+                    base_url=base_url,
+                    headers=headers,
+                    timeout=5.0,
+                ) as client:
+                    user_response = await client.get("/user")
+                    if user_response.is_success:
+                        identity = user_response.json().get("login")
+                        capabilities[0].status = CapabilityStatus.VERIFIED
+                        capabilities[0].detail = "The GitHub token authenticated successfully."
+                    else:
+                        capabilities[0].status = CapabilityStatus.BLOCKED
+                        capabilities[0].detail = (
+                            f"Authentication probe failed with status {user_response.status_code}."
+                        )
+
+                    for header_name in (
+                        "x-oauth-scopes",
+                        "x-accepted-oauth-scopes",
+                        "x-accepted-github-permissions",
+                    ):
+                        header_value = user_response.headers.get(header_name)
+                        if header_value:
+                            evidence.append(f"{header_name}: {header_value}")
+
+                    repo_response = await client.get(f"/repos/{repository}")
+                    if repo_response.is_success:
+                        capabilities[1].status = CapabilityStatus.VERIFIED
+                        capabilities[1].detail = "The token can read the configured repository."
+                    else:
+                        capabilities[1].status = CapabilityStatus.BLOCKED
+                        capabilities[1].detail = (
+                            f"Repository read probe failed with status {repo_response.status_code}."
+                        )
+
+                    pulls_response = await client.get(
+                        f"/repos/{repository}/pulls",
+                        params={"per_page": 1, "state": "open"},
+                    )
+                    if pulls_response.is_success:
+                        capabilities[2].status = CapabilityStatus.VERIFIED
+                        capabilities[2].detail = "The token can read pull request metadata."
+                    else:
+                        capabilities[2].status = CapabilityStatus.BLOCKED
+                        capabilities[2].detail = (
+                            f"Pull request probe failed with status {pulls_response.status_code}."
+                        )
+            except httpx.HTTPError as exc:
+                capabilities[0].status = CapabilityStatus.BLOCKED
+                capabilities[0].detail = f"Authentication probe failed: {exc}"
+                capabilities[1].status = CapabilityStatus.UNKNOWN
+                capabilities[2].status = CapabilityStatus.UNKNOWN
+
+        configured = not missing_fields and capabilities[0].status == CapabilityStatus.VERIFIED
+        message = (
+            "GitHub Enterprise Cloud is ready for safe repo-scoped alert routing."
+            if configured
+            else (
+                "Connect GitHub Enterprise Cloud and verify repo read access "
+                "before enabling live alerts."
+            )
+        )
+        return {
+            "ok": configured,
+            "configured": configured,
+            "source": self.source.value,
+            "identity": identity,
+            "missing_fields": missing_fields,
+            "capabilities": [cap.model_dump(mode="json") for cap in capabilities],
+            "message": message,
+            "evidence": evidence,
         }
 
     async def poll_events(self) -> list[ActivityEvent]:
         return []
 
     async def handle_webhook(self, payload: dict[str, object]) -> ActivityEvent:
-        action = str(payload.get("action", "github.event"))
-        pull_request = (
-            payload.get("pull_request", {})
-            if isinstance(payload.get("pull_request"), dict)
-            else {}
-        )
-        repository = (
-            payload.get("repository", {})
-            if isinstance(payload.get("repository"), dict)
-            else {}
-        )
-        title = pull_request.get("title") or repository.get("full_name") or "GitHub activity"
-        body = pull_request.get("body") or f"GitHub action: {action}"
+        action = str(payload.get("action", "activity"))
+        if payload.get("pull_request") is not None:
+            event_family = "pull_request"
+            title_source = payload.get("pull_request", {})
+        elif payload.get("issue") is not None:
+            event_family = "issue"
+            title_source = payload.get("issue", {})
+        else:
+            event_family = str(payload.get("event_name", "event"))
+            title_source = payload.get("repository", {})
+
+        title = title_source.get("title") if isinstance(title_source, dict) else None
+        if not title:
+            repository = (
+                payload.get("repository", {})
+                if isinstance(payload.get("repository"), dict)
+                else {}
+            )
+            title = repository.get("full_name") or "GitHub activity"
+
+        body = ""
+        if isinstance(title_source, dict):
+            body = str(title_source.get("body") or "")
+        if not body:
+            body = f"GitHub action: {event_family}.{action}"
+
         sender = payload.get("sender", {}) if isinstance(payload.get("sender"), dict) else {}
         return ActivityEvent(
             source=self.source,
-            event_type=f"github.{action}",
+            event_type=f"github.{event_family}.{action}",
             title=str(title),
             body=str(body),
-            external_id=str(pull_request.get("id", payload.get("delivery", "github-event"))),
+            external_id=str(title_source.get("id", payload.get("delivery", "github-event"))),
             actor=str(sender.get("login")) if sender.get("login") else None,
             metadata=payload,
         )
@@ -74,3 +197,35 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
             "action": action,
             "message": "Not implemented.",
         }
+
+    def available_subscriptions(self) -> list[EventSubscription]:
+        return [
+            EventSubscription(
+                key="review_requested",
+                label="Review requested",
+                description="Create work when a pull request review is requested.",
+                required_capabilities=["repo_read", "pull_request_read"],
+            ),
+            EventSubscription(
+                key="pull_request_activity",
+                label="Pull request activity",
+                description="Track key pull request lifecycle changes.",
+                required_capabilities=["repo_read", "pull_request_read"],
+            ),
+            EventSubscription(
+                key="issue_activity",
+                label="Issue activity",
+                description="Track GitHub issues relevant to the selected repository.",
+                required_capabilities=["repo_read"],
+            ),
+        ]
+
+    def classify_event(self, event: ActivityEvent) -> str | None:
+        lowered = event.event_type.lower()
+        if "review_requested" in lowered:
+            return "review_requested"
+        if "pull_request" in lowered:
+            return "pull_request_activity"
+        if "issue" in lowered:
+            return "issue_activity"
+        return None

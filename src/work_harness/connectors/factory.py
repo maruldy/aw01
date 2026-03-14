@@ -10,10 +10,25 @@ from work_harness.connectors.slack_enterprise_grid import SlackEnterpriseGridAda
 from work_harness.domain.models import ConnectorSource
 
 
+def build_connector(source: ConnectorSource, settings: Settings):
+    if source == ConnectorSource.JIRA:
+        return JiraSelfHostedEnterpriseAdapter(settings)
+    if source == ConnectorSource.CONFLUENCE:
+        return ConfluenceSelfHostedEnterpriseAdapter(settings)
+    if source == ConnectorSource.SLACK:
+        return SlackEnterpriseGridAdapter(settings)
+    if source == ConnectorSource.GITHUB:
+        return GitHubEnterpriseCloudAdapter(settings)
+    raise KeyError(source)
+
+
 def build_connectors(settings: Settings):
     return {
-        ConnectorSource.JIRA: JiraSelfHostedEnterpriseAdapter(settings),
-        ConnectorSource.CONFLUENCE: ConfluenceSelfHostedEnterpriseAdapter(settings),
-        ConnectorSource.SLACK: SlackEnterpriseGridAdapter(settings),
-        ConnectorSource.GITHUB: GitHubEnterpriseCloudAdapter(settings),
+        source: build_connector(source, settings)
+        for source in (
+            ConnectorSource.JIRA,
+            ConnectorSource.CONFLUENCE,
+            ConnectorSource.SLACK,
+            ConnectorSource.GITHUB,
+        )
     }

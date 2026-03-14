@@ -67,7 +67,21 @@ export async function getProfiles() {
 }
 
 export async function validateProfile(source: string) {
-  return request<{ ok: boolean; source: string }>(`/settings/validate/${source}`, { method: "POST" });
+  return request<ConnectorProfile>(`/settings/validate/${source}`, { method: "POST" });
+}
+
+export async function updateSubscriptions(source: string, selectedEventKeys: string[]) {
+  return request<ConnectorProfile>(`/settings/subscriptions/${source}`, {
+    method: "POST",
+    body: JSON.stringify({ selected_event_keys: selectedEventKeys })
+  });
+}
+
+export async function updateConnectorConfig(source: string, values: Record<string, string>) {
+  return request<ConnectorProfile>(`/settings/config/${source}`, {
+    method: "POST",
+    body: JSON.stringify({ values })
+  });
 }
 
 export async function triggerBackfill() {

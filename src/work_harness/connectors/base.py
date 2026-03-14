@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from work_harness.domain.models import ActivityEvent, ConnectorSource
+from work_harness.domain.models import ActivityEvent, ConnectorSource, EventSubscription
 
 
 class ConnectorAdapter(ABC):
@@ -29,3 +29,10 @@ class ConnectorAdapter(ABC):
     async def execute_remote_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
+    def available_subscriptions(self) -> list[EventSubscription]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def classify_event(self, event: ActivityEvent) -> str | None:
+        raise NotImplementedError

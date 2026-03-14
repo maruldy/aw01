@@ -27,10 +27,16 @@ class Settings(BaseSettings):
     slack_bot_token: str | None = None
     slack_user_token: str | None = None
     slack_my_user_id: str | None = None
+    slack_signing_secret: str | None = None
 
     github_base_url: str = "https://api.github.com"
     github_token: str | None = None
     github_repository: str | None = None
+    github_webhook_secret: str | None = None
+
+    webhook_base_url: str = "http://localhost:8000"
+    jira_webhook_shared_secret: str | None = None
+    confluence_webhook_secret: str | None = None
 
     knowledge_db_path: Path = Field(default=Path("./data/work_harness.db"))
     knowledge_chroma_path: Path = Field(default=Path("./data/chroma"))
