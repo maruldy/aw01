@@ -144,6 +144,7 @@ class ConnectorProfile(BaseModel):
     advisory: str = ""
     config_fields: list["ConnectorConfigField"] = Field(default_factory=list)
     webhook: "WebhookProviderMetadata | None" = None
+    detected_scopes: list[str] = Field(default_factory=list)
 
 
 class ConnectorCapability(BaseModel):

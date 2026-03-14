@@ -285,13 +285,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             connector_source = ConnectorSource(source)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Unknown source") from exc
-        from work_harness.services.settings_service import AVAILABLE_REMOTE_ACTIONS
+        available = await app.state.settings_service.get_available_tools(
+            connector_source,
+        )
         allowed = await app.state.settings_service.get_allowed_actions(
             connector_source,
         )
+        profile = await app.state.settings_service.get_profile(connector_source)
         return {
             "source": source,
-            "available": AVAILABLE_REMOTE_ACTIONS.get(source, []),
+            "detected_scopes": profile.detected_scopes,
+            "available": available,
             "allowed": allowed,
         }
 
@@ -305,14 +309,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             connector_source = ConnectorSource(source)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Unknown source") from exc
-        from work_harness.services.settings_service import AVAILABLE_REMOTE_ACTIONS
         actions = payload.get("allowed", [])
         saved = await app.state.settings_service.set_allowed_actions(
             connector_source, actions,
         )
+        available = await app.state.settings_service.get_available_tools(
+            connector_source,
+        )
         return {
             "source": source,
-            "available": AVAILABLE_REMOTE_ACTIONS.get(source, []),
+            "available": available,
             "allowed": saved,
         }
 

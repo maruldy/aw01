@@ -197,11 +197,28 @@ class HarnessService:
             item.source,
         )
         if not allowed:
-            logger.info("Steering skipped: no allowed actions for %s", item.source.value)
+            logger.info(
+                "Steering skipped: no allowed actions for %s",
+                item.source.value,
+            )
             return {
                 "type": "steering_skip",
-                "reasoning": f"No actions enabled for {item.source.value}. "
-                "Enable actions in Settings.",
+                "reasoning": (
+                    f"No actions enabled for {item.source.value}. "
+                    "Enable actions in Settings."
+                ),
+            }
+
+        available_tools = await self._settings_service.get_available_tools(
+            item.source,
+        )
+        usable_tools = [
+            t for t in available_tools if str(t["key"]) in allowed
+        ]
+        if not usable_tools:
+            return {
+                "type": "steering_skip",
+                "reasoning": "No tools available for the current token scopes.",
             }
 
         repo = ""
@@ -210,19 +227,21 @@ class HarnessService:
             if isinstance(repo_meta, dict):
                 repo = str(repo_meta.get("full_name", ""))
 
-        actions_str = ", ".join(allowed)
+        tool_lines = "\n".join(
+            f"- {t['key']}: {t['description']} "
+            f"Params: {t.get('parameter_hints', '')}"
+            for t in usable_tools
+        )
         prompt = (
             f"Source: {item.source.value}\n"
             f"Title: {item.title}\n"
             f"Body: {item.body}\n"
             f"Repository: {repo}\n"
             f"Operator instruction: {comment}\n\n"
-            f"Available actions for {item.source.value}: "
-            f"{actions_str}\n"
-            f"If the instruction does not match any available "
-            f"action, return action='none'.\n"
-            f"For create_issue, include repository, title, "
-            f"and body in params."
+            f"Available tools:\n{tool_lines}\n\n"
+            f"Pick the best tool and return its key as action. "
+            f"If no tool matches, return action='none'.\n"
+            f"Include relevant parameters in params."
         )
         schema = {
             "title": "RemoteActionPlan",

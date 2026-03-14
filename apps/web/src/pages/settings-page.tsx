@@ -29,6 +29,7 @@ export function SettingsPage() {
   const [manualRepoInput, setManualRepoInput] = useState("");
   const [availableActions, setAvailableActions] = useState<Array<{ key: string; label: string; description: string }>>([]);
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
+  const [detectedScopes, setDetectedScopes] = useState<string[]>([]);
 
   async function applyProfiles(nextProfiles: ConnectorProfile[]) {
     setProfiles(nextProfiles);
@@ -75,10 +76,12 @@ export function SettingsPage() {
       .then((data) => {
         setAvailableActions(data.available);
         setAllowedActions(data.allowed);
+        setDetectedScopes((data as Record<string, unknown>).detected_scopes as string[] ?? []);
       })
       .catch(() => {
         setAvailableActions([]);
         setAllowedActions([]);
+        setDetectedScopes([]);
       });
   }, [activeTab]);
 
@@ -371,6 +374,14 @@ export function SettingsPage() {
 
                   <div className="rounded-[18px] border border-black/5 bg-white/90 p-4">
                     <p className="eyebrow">{t("settings.allowedActions")}</p>
+                    {detectedScopes.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="text-xs text-ink/45">{t("settings.detectedScopes")}:</span>
+                        {detectedScopes.map((scope) => (
+                          <span key={scope} className="rounded-full bg-ocean/10 px-2 py-0.5 text-xs font-medium text-ocean">{scope}</span>
+                        ))}
+                      </div>
+                    ) : null}
                     {availableActions.length > 0 ? (
                       <div className="mt-3 space-y-2">
                         {availableActions.map((action) => {

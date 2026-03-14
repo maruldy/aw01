@@ -257,6 +257,7 @@ class SettingsService:
             advisory=str(recommendation["advisory"]),
             config_fields=config_fields,
             webhook=self._build_webhook_metadata(source),
+            detected_scopes=validation.get("detected_scopes", []),
         )
 
     async def update_selected_event_keys(
@@ -329,14 +330,25 @@ class SettingsService:
         saved = await self._store.get_allowed_actions(source.value)
         return saved if saved is not None else []
 
+    async def get_available_tools(
+        self,
+        source: ConnectorSource,
+    ) -> list[dict[str, object]]:
+        if source == ConnectorSource.GITHUB:
+            from work_harness.connectors.github_tool_registry import (
+                tools_for_scopes,
+            )
+            profile = await self.get_profile(source)
+            return tools_for_scopes(profile.detected_scopes)
+        return AVAILABLE_REMOTE_ACTIONS.get(source.value, [])
+
     async def set_allowed_actions(
         self,
         source: ConnectorSource,
         actions: list[str],
     ) -> list[str]:
-        available_keys = {
-            a["key"] for a in AVAILABLE_REMOTE_ACTIONS.get(source.value, [])
-        }
+        available = await self.get_available_tools(source)
+        available_keys = {str(a["key"]) for a in available}
         filtered = [a for a in actions if a in available_keys]
         await self._store.set_allowed_actions(source.value, filtered)
         return filtered

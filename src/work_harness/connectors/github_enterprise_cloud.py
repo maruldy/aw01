@@ -76,6 +76,7 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
 
         identity = None
         evidence: list[str] = []
+        detected_scopes: list[str] = []
         if not token_missing:
             headers = {
                 "Authorization": f"Bearer {self._settings.github_token}",
@@ -98,6 +99,9 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                         capabilities[0].detail = (
                             f"Authentication probe failed with status {user_response.status_code}."
                         )
+
+                    raw_scopes = user_response.headers.get("x-oauth-scopes", "")
+                    detected_scopes = [s.strip() for s in raw_scopes.split(",") if s.strip()]
 
                     for header_name in (
                         "x-oauth-scopes",
@@ -171,6 +175,7 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
             "capabilities": [cap.model_dump(mode="json") for cap in capabilities],
             "message": message,
             "evidence": evidence,
+            "detected_scopes": detected_scopes if not token_missing else [],
         }
 
     async def poll_events(self) -> list[ActivityEvent]:
@@ -267,14 +272,21 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
         action: str,
         payload: dict[str, object],
     ) -> dict[str, object]:
-        if action == "create_issue":
-            return await self._create_issue(payload)
-        return {
-            "ok": False,
-            "source": self.source.value,
-            "action": action,
-            "message": "Not implemented.",
-        }
+        handler = {
+            "create_issue": self._create_issue,
+            "add_issue_comment": self._add_issue_comment,
+            "list_issues": self._list_issues,
+            "create_pull_request": self._create_pull_request,
+            "add_label": self._add_label,
+        }.get(action)
+        if handler is None:
+            return {
+                "ok": False,
+                "source": self.source.value,
+                "action": action,
+                "message": f"Unknown action: {action}",
+            }
+        return await handler(payload)
 
     async def _create_issue(
         self,
@@ -340,6 +352,145 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                 "action": "create_issue",
                 "message": str(exc),
             }
+
+    async def _add_issue_comment(
+        self, payload: dict[str, object],
+    ) -> dict[str, object]:
+        repo = str(
+            payload.get("repository")
+            or self._settings.github_repository.split(",")[0].strip()
+        )
+        issue_number = payload.get("issue_number")
+        body_text = str(payload.get("body", ""))
+        if not self._settings.github_token or not repo or not issue_number:
+            return {"ok": False, "action": "add_issue_comment", "message": "Missing params."}
+        headers = {
+            "Authorization": f"Bearer {self._settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.github_base_url.rstrip("/"),
+                headers=headers, timeout=10.0,
+            ) as client:
+                r = await client.post(
+                    f"/repos/{repo}/issues/{issue_number}/comments",
+                    json={"body": body_text},
+                )
+            if r.is_success:
+                data = r.json()
+                return {"ok": True, "action": "add_issue_comment", "html_url": data.get("html_url")}
+            return {"ok": False, "action": "add_issue_comment", "message": f"HTTP {r.status_code}"}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "action": "add_issue_comment", "message": str(exc)}
+
+    async def _list_issues(
+        self, payload: dict[str, object],
+    ) -> dict[str, object]:
+        repo = str(
+            payload.get("repository")
+            or self._settings.github_repository.split(",")[0].strip()
+        )
+        state = str(payload.get("state", "open"))
+        if not self._settings.github_token or not repo:
+            return {"ok": False, "action": "list_issues", "message": "Missing params."}
+        headers = {
+            "Authorization": f"Bearer {self._settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.github_base_url.rstrip("/"),
+                headers=headers, timeout=10.0,
+            ) as client:
+                r = await client.get(
+                    f"/repos/{repo}/issues",
+                    params={"state": state, "per_page": 10},
+                )
+            if r.is_success:
+                items = [
+                    {"number": i["number"], "title": i["title"], "state": i["state"]}
+                    for i in r.json() if isinstance(i, dict)
+                ]
+                return {"ok": True, "action": "list_issues", "issues": items}
+            return {"ok": False, "action": "list_issues", "message": f"HTTP {r.status_code}"}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "action": "list_issues", "message": str(exc)}
+
+    async def _create_pull_request(
+        self, payload: dict[str, object],
+    ) -> dict[str, object]:
+        repo = str(
+            payload.get("repository")
+            or self._settings.github_repository.split(",")[0].strip()
+        )
+        title = str(payload.get("title", ""))
+        body_text = str(payload.get("body", ""))
+        head = str(payload.get("head", ""))
+        base = str(payload.get("base", "main"))
+        if not self._settings.github_token or not repo or not title or not head:
+            return {"ok": False, "action": "create_pull_request", "message": "Missing params."}
+        headers = {
+            "Authorization": f"Bearer {self._settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.github_base_url.rstrip("/"),
+                headers=headers, timeout=10.0,
+            ) as client:
+                r = await client.post(
+                    f"/repos/{repo}/pulls",
+                    json={"title": title, "body": body_text, "head": head, "base": base},
+                )
+            if r.is_success:
+                data = r.json()
+                return {
+                    "ok": True, "action": "create_pull_request",
+                    "number": data.get("number"),
+                    "html_url": data.get("html_url"),
+                }
+            return {
+                "ok": False, "action": "create_pull_request",
+                "message": f"HTTP {r.status_code}",
+            }
+        except httpx.HTTPError as exc:
+            return {"ok": False, "action": "create_pull_request", "message": str(exc)}
+
+    async def _add_label(
+        self, payload: dict[str, object],
+    ) -> dict[str, object]:
+        repo = str(
+            payload.get("repository")
+            or self._settings.github_repository.split(",")[0].strip()
+        )
+        issue_number = payload.get("issue_number")
+        labels = payload.get("labels", [])
+        if not self._settings.github_token or not repo or not issue_number or not labels:
+            return {"ok": False, "action": "add_label", "message": "Missing params."}
+        headers = {
+            "Authorization": f"Bearer {self._settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.github_base_url.rstrip("/"),
+                headers=headers, timeout=10.0,
+            ) as client:
+                r = await client.post(
+                    f"/repos/{repo}/issues/{issue_number}/labels",
+                    json={"labels": list(labels)},
+                )
+            if r.is_success:
+                names = [
+                    item.get("name")
+                    for item in r.json()
+                    if isinstance(item, dict)
+                ]
+                return {"ok": True, "action": "add_label", "labels": names}
+            return {"ok": False, "action": "add_label", "message": f"HTTP {r.status_code}"}
+        except httpx.HTTPError as exc:
+            return {"ok": False, "action": "add_label", "message": str(exc)}
 
     def available_subscriptions(self) -> list[EventSubscription]:
         return [
