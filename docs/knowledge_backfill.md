@@ -8,7 +8,9 @@ Knowledge now grows from webhook-driven lifecycle events and scoped on-demand re
 
 ## Current implementation
 
-The current status path still lives in [backfill.py](../src/work_harness/services/backfill.py), but it is disabled and does not write to the knowledge store.
+The runtime does not expose a manual backfill trigger.
+
+Historical knowledge is not seeded automatically and does not write to the knowledge store outside explicit policy-approved flows.
 
 ## Current operating policy
 

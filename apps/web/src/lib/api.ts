@@ -50,10 +50,6 @@ export async function getKnowledgeRecent() {
   return request<{ items: Array<Record<string, string>> }>("/knowledge/recent");
 }
 
-export async function getHealth() {
-  return request<{ ok: boolean; backfill: Record<string, unknown>; knowledge: Record<string, unknown> }>("/health");
-}
-
 export async function getAuditRecent() {
   return request<{ items: Array<Record<string, unknown>> }>("/audit/recent");
 }

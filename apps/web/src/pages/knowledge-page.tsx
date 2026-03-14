@@ -1,36 +1,32 @@
 import { useEffect, useState } from "react";
 
-import { getAuditRecent, getHealth, getKnowledgeRecent, getKnowledgeStats } from "../lib/api";
+import { getAuditRecent, getKnowledgeRecent, getKnowledgeStats } from "../lib/api";
 import { StatCard } from "../components/stat-card";
 
 export function KnowledgePage() {
   const [stats, setStats] = useState<{ total: number; avg_iterations: number; by_month: { month: string; count: number }[] } | null>(null);
   const [recent, setRecent] = useState<Array<Record<string, string>>>([]);
   const [audit, setAudit] = useState<Array<Record<string, unknown>>>([]);
-  const [syncState, setSyncState] = useState<string>("disabled");
 
   useEffect(() => {
     async function load() {
-      const [nextStats, nextRecent, nextAudit, health] = await Promise.all([
+      const [nextStats, nextRecent, nextAudit] = await Promise.all([
         getKnowledgeStats(),
         getKnowledgeRecent(),
-        getAuditRecent(),
-        getHealth()
+        getAuditRecent()
       ]);
       setStats(nextStats);
       setRecent(nextRecent.items);
       setAudit(nextAudit.items);
-      setSyncState(String(health.backfill.state ?? "disabled"));
     }
     void load();
   }, []);
 
   return (
     <div className="space-y-6">
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2">
         <StatCard label="Stored analyses" value={stats?.total ?? 0} hint="Accumulated event and decision context." />
         <StatCard label="Average iterations" value={(stats?.avg_iterations ?? 0).toFixed(1)} hint="Mean synthesis iterations per stored analysis." />
-        <StatCard label="Historical sync" value={syncState} hint="Bulk startup sync is disabled. Knowledge grows from webhook lifecycle events." />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">

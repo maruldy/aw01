@@ -75,7 +75,7 @@ The harness should avoid storing full raw bodies by default, especially for Slac
 
 ## Backfill Policy
 
-Backfill remains available as a controlled operation, but it should not be the default strategy.
+Historical backfill is not implemented by default.
 
 If backfill is implemented later, it must include:
 

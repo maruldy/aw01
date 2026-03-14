@@ -42,7 +42,3 @@ class Settings(BaseSettings):
     knowledge_db_path: Path = Field(default=Path("./data/work_harness.db"))
     knowledge_chroma_path: Path = Field(default=Path("./data/chroma"))
     managed_workspace_root: Path = Field(default=Path("./.workspaces"))
-
-    daily_delta_scan_hour: int = 3
-    weekly_digest_day: str = "mon"
-    weekly_digest_hour: int = 9

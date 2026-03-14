@@ -114,7 +114,7 @@ export function SettingsPage() {
         <p className="eyebrow">Setup wizard</p>
         <h1 className="panel-title">Validate enterprise connectors</h1>
         <p className="mt-3 text-sm text-ink/70">
-          Knowledge is synced from webhook-driven lifecycle events. Startup backfill is disabled.
+          Knowledge is synced from webhook-driven lifecycle events.
         </p>
       </section>
 
@@ -301,6 +301,11 @@ export function SettingsPage() {
           <p className="eyebrow">Scheduler</p>
           <h2 className="panel-title">Registered jobs</h2>
           <div className="mt-5 space-y-3">
+            {jobs.length === 0 ? (
+              <div className="rounded-[22px] bg-canvas px-4 py-3 text-sm text-ink/65">
+                No recurring jobs are registered.
+              </div>
+            ) : null}
             {jobs.map((job) => (
               <div key={job.id} className="rounded-[22px] bg-canvas px-4 py-3">
                 <p className="font-display text-lg">{job.id}</p>

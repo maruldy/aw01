@@ -22,7 +22,6 @@ from work_harness.graph.supervisor import SupervisorService
 from work_harness.providers.openai_provider import OpenAIChatProvider
 from work_harness.providers.rule_based import RuleBasedChatProvider
 from work_harness.services.audit_log import AuditLog
-from work_harness.services.backfill import BackfillService
 from work_harness.services.harness import HarnessService
 from work_harness.services.knowledge_service import KnowledgeService
 from work_harness.services.knowledge_store import KnowledgeStore
@@ -84,8 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit_log,
         settings_service,
     )
-    backfill = BackfillService(knowledge_store)
-    scheduler = SchedulerService(app_settings, backfill)
+    scheduler = SchedulerService()
 
     async def ensure_runtime(app: FastAPI) -> None:
         if getattr(app.state, "runtime_ready", False):
@@ -100,7 +98,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.settings = app_settings
         app.state.harness = harness
-        app.state.backfill = backfill
         app.state.scheduler = scheduler
         app.state.knowledge_store = knowledge_store
         app.state.settings_service = settings_service
@@ -113,7 +110,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title=app_settings.app_name, lifespan=lifespan)
     app.state.settings = app_settings
     app.state.harness = harness
-    app.state.backfill = backfill
     app.state.scheduler = scheduler
     app.state.knowledge_store = knowledge_store
     app.state.settings_service = settings_service
@@ -131,8 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, Any]:
         await ensure_runtime(app)
         stats = await app.state.knowledge_store.get_stats()
-        backfill_status = await app.state.backfill.status()
-        return {"ok": True, "knowledge": stats, "backfill": backfill_status}
+        return {"ok": True, "knowledge": stats}
 
     @app.post("/ingress/{source}", status_code=202)
     async def ingress(source: str, request: IngressRequest) -> dict[str, Any]:
@@ -193,16 +188,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return run.model_dump(mode="json")
-
-    @app.post("/backfill/trigger")
-    async def trigger_backfill() -> dict[str, Any]:
-        await ensure_runtime(app)
-        return await app.state.backfill.trigger()
-
-    @app.get("/backfill/status")
-    async def backfill_status() -> dict[str, Any]:
-        await ensure_runtime(app)
-        return await app.state.backfill.status()
 
     @app.get("/knowledge/stats")
     async def knowledge_stats() -> dict[str, Any]:
