@@ -217,7 +217,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/settings/profiles")
     async def settings_profiles() -> dict[str, Any]:
         await ensure_runtime(app)
-        profiles = await app.state.settings_service.list_profiles()
+        profiles = await app.state.settings_service.list_profiles(
+            validate_connectors=False
+        )
         return {"profiles": [profile.model_dump(mode="json") for profile in profiles]}
 
     @app.post("/settings/validate/{source}")

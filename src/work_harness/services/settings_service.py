@@ -139,15 +139,30 @@ class SettingsService:
         self._store = store
         self._advisor = advisor
 
-    async def list_profiles(self) -> list[ConnectorProfile]:
+    async def list_profiles(
+        self,
+        *,
+        validate_connectors: bool = True,
+    ) -> list[ConnectorProfile]:
         profiles = []
         for source in self._connectors:
-            profiles.append(await self.get_profile(source))
+            profiles.append(
+                await self.get_profile(source, validate_connectors=validate_connectors)
+            )
         return profiles
 
-    async def get_profile(self, source: ConnectorSource) -> ConnectorProfile:
+    async def get_profile(
+        self,
+        source: ConnectorSource,
+        *,
+        validate_connectors: bool = True,
+    ) -> ConnectorProfile:
         connector = await self.get_runtime_connector(source)
-        validation = await connector.validate()
+        if validate_connectors:
+            validation = await connector.validate()
+        else:
+            runtime_settings = await self.get_runtime_settings_for_source(source)
+            validation = self._build_local_validation(source, runtime_settings)
         capabilities = [
             ConnectorCapability.model_validate(item)
             for item in validation.get("capabilities", [])
@@ -200,6 +215,210 @@ class SettingsService:
             config_fields=config_fields,
             webhook=self._build_webhook_metadata(source),
         )
+
+    def _build_local_validation(
+        self,
+        source: ConnectorSource,
+        runtime_settings: Settings,
+    ) -> dict[str, object]:
+        if source == ConnectorSource.JIRA:
+            missing_fields = []
+            if not runtime_settings.jira_base_url:
+                missing_fields.append("JIRA_BASE_URL")
+            if not runtime_settings.jira_api_token:
+                missing_fields.append("JIRA_API_TOKEN")
+            capabilities = [
+                ConnectorCapability(
+                    key="auth",
+                    label="Authenticate to Jira",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Validate the Jira token against the self-hosted REST API.",
+                ),
+                ConnectorCapability(
+                    key="issue_read",
+                    label="Read issues",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Read issue payloads needed for event triage.",
+                ),
+                ConnectorCapability(
+                    key="issue_search",
+                    label="Search issues",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Run limited JQL searches for enrichment and local knowledge lookup.",
+                ),
+            ]
+            message = (
+                "Connect Jira self-hosted and verify read access before enabling live issue alerts."
+                if missing_fields
+                else "Configuration loaded. Run validate to confirm Jira access."
+            )
+        elif source == ConnectorSource.CONFLUENCE:
+            missing_fields = []
+            if not runtime_settings.confluence_url:
+                missing_fields.append("CONFLUENCE_URL")
+            if not runtime_settings.confluence_api_token:
+                missing_fields.append("CONFLUENCE_API_TOKEN")
+            capabilities = [
+                ConnectorCapability(
+                    key="auth",
+                    label="Authenticate to Confluence",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Validate the Confluence token against the self-hosted REST API.",
+                ),
+                ConnectorCapability(
+                    key="space_read",
+                    label="Read spaces",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Read configured spaces for event context and knowledge sync.",
+                ),
+                ConnectorCapability(
+                    key="content_read",
+                    label="Read content",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Read Confluence pages and comments for enrichment.",
+                ),
+            ]
+            message = (
+                "Connect Confluence self-hosted and verify read access before "
+                "enabling live content alerts."
+                if missing_fields
+                else "Configuration loaded. Run validate to confirm Confluence access."
+            )
+        elif source == ConnectorSource.SLACK:
+            missing_fields = []
+            if not runtime_settings.slack_bot_token:
+                missing_fields.append("SLACK_BOT_TOKEN")
+            capabilities = [
+                ConnectorCapability(
+                    key="auth",
+                    label="Authenticate to Slack",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Validate the bot token with Slack auth.test.",
+                ),
+                ConnectorCapability(
+                    key="channels_read",
+                    label="Read channel list",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Confirm that the token exposes channel membership and listing scopes.",
+                ),
+                ConnectorCapability(
+                    key="history_read",
+                    label="Read message history",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if missing_fields
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Confirm that the token can read relevant message history.",
+                ),
+            ]
+            message = (
+                "Connect Slack Enterprise Grid and verify read scopes before enabling live alerts."
+                if missing_fields
+                else "Configuration loaded. Run validate to confirm Slack access."
+            )
+        elif source == ConnectorSource.GITHUB:
+            missing_fields = []
+            token_missing = not runtime_settings.github_token
+            repository_missing = not runtime_settings.github_repository
+            if token_missing:
+                missing_fields.append("GITHUB_TOKEN")
+            if repository_missing:
+                missing_fields.append("GITHUB_REPOSITORY")
+            capabilities = [
+                ConnectorCapability(
+                    key="auth",
+                    label="Authenticate to GitHub",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if token_missing
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail="Validate the GitHub token against the REST API.",
+                ),
+                ConnectorCapability(
+                    key="repo_read",
+                    label="Read repository",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if token_missing or repository_missing
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail=(
+                        "Select a repository after connecting GitHub."
+                        if repository_missing
+                        else "Confirm read access to the configured repository."
+                    ),
+                ),
+                ConnectorCapability(
+                    key="pull_request_read",
+                    label="Read pull requests",
+                    status=(
+                        CapabilityStatus.MISSING_CONFIG
+                        if token_missing or repository_missing
+                        else CapabilityStatus.UNKNOWN
+                    ),
+                    detail=(
+                        "Select a repository after connecting GitHub."
+                        if repository_missing
+                        else "Confirm read access to pull request metadata."
+                    ),
+                ),
+            ]
+            if token_missing:
+                message = (
+                    "Connect GitHub Enterprise Cloud and verify repo read access "
+                    "before enabling live alerts."
+                )
+            elif repository_missing:
+                message = "GitHub account connected. Select a repository to finish setup."
+            else:
+                message = "Configuration loaded. Run validate to confirm GitHub access."
+        else:
+            raise KeyError(source)
+
+        return {
+            "ok": False,
+            "configured": not missing_fields,
+            "source": source.value,
+            "identity": None,
+            "missing_fields": missing_fields,
+            "capabilities": [cap.model_dump(mode="json") for cap in capabilities],
+            "message": message,
+            "evidence": [],
+        }
 
     async def update_selected_event_keys(
         self,

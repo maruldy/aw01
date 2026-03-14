@@ -7,6 +7,9 @@ from fastapi.testclient import TestClient
 
 from work_harness.api.app import create_app
 from work_harness.config import Settings
+from work_harness.connectors.atlassian_self_hosted_enterprise import (
+    JiraSelfHostedEnterpriseAdapter,
+)
 from work_harness.services.settings_service import SettingsService
 
 
@@ -39,6 +42,21 @@ def test_settings_profiles_lists_available_connectors() -> None:
         assert profiles_by_source["slack"]["subscriptions"]
         assert profiles_by_source["slack"]["recommended_event_keys"] == []
         assert profiles_by_source["slack"]["selected_event_keys"] == []
+
+
+def test_settings_profiles_do_not_validate_connectors_on_initial_load(
+    monkeypatch,
+) -> None:
+    async def fail_validate(self) -> dict[str, object]:
+        raise AssertionError("initial settings load should not validate connectors")
+
+    monkeypatch.setattr(JiraSelfHostedEnterpriseAdapter, "validate", fail_validate)
+
+    settings = Settings(knowledge_db_path=Path("./data/test_settings_profiles_fast.db"))
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/settings/profiles")
+
+    assert response.status_code == 200
 
 
 def test_settings_validate_returns_connector_status() -> None:
