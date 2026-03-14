@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import secrets
+from urllib.parse import urlencode, urlsplit, urlunsplit
+
+import httpx
+
 from work_harness.config import Settings
 from work_harness.connectors.base import ConnectorAdapter
 from work_harness.connectors.factory import build_connector
@@ -15,6 +20,8 @@ from work_harness.domain.models import (
 )
 from work_harness.services.settings_advisor import SettingsAdvisor
 from work_harness.services.settings_store import SettingsStore
+
+GITHUB_OAUTH_SCOPES = "read:user repo"
 
 CONFIG_FIELD_DEFINITIONS: dict[ConnectorSource, list[ConnectorConfigField]] = {
     ConnectorSource.JIRA: [
@@ -107,14 +114,6 @@ CONFIG_FIELD_DEFINITIONS: dict[ConnectorSource, list[ConnectorConfigField]] = {
                 "Keep the default for GitHub Enterprise Cloud "
                 "unless you use a custom API host."
             ),
-        ),
-        ConnectorConfigField(
-            key="github_token",
-            label="GitHub token",
-            placeholder="ghp_...",
-            help_text="Prefer repo read and pull request read only for initial harness setup.",
-            required=True,
-            sensitive=True,
         ),
         ConnectorConfigField(
             key="github_repository",
@@ -218,6 +217,65 @@ class SettingsService:
         await self._store.set_runtime_settings(source.value, values)
         return await self.get_profile(source)
 
+    async def start_github_connection(
+        self,
+        frontend_origin: str,
+        next_path: str = "/settings",
+    ) -> str:
+        if (
+            not self._base_settings.github_client_id
+            or not self._base_settings.github_client_secret
+        ):
+            raise ValueError("GitHub browser connect is not configured on the server.")
+
+        parsed_origin = urlsplit(frontend_origin)
+        if parsed_origin.scheme not in {"http", "https"} or not parsed_origin.netloc:
+            raise ValueError("Invalid frontend origin.")
+        if not next_path.startswith("/") or next_path.startswith("//"):
+            raise ValueError("Invalid frontend path.")
+
+        state = secrets.token_urlsafe(24)
+        await self._store.save_oauth_state(
+            ConnectorSource.GITHUB.value,
+            state,
+            frontend_origin.rstrip("/"),
+            next_path,
+        )
+        params = urlencode(
+            {
+                "client_id": self._base_settings.github_client_id,
+                "redirect_uri": self._github_callback_url(),
+                "scope": GITHUB_OAUTH_SCOPES,
+                "state": state,
+            }
+        )
+        return f"https://github.com/login/oauth/authorize?{params}"
+
+    async def complete_github_connection(self, code: str, state: str) -> str:
+        oauth_state = await self._store.consume_oauth_state(state)
+        if oauth_state is None or oauth_state["source"] != ConnectorSource.GITHUB.value:
+            raise ValueError("Unknown or expired GitHub connection state.")
+
+        access_token = await self._exchange_github_code_for_token(code)
+        await self._store.set_runtime_settings(
+            ConnectorSource.GITHUB.value,
+            {"github_token": access_token},
+        )
+        return self._build_frontend_redirect(
+            oauth_state["frontend_origin"],
+            oauth_state["next_path"],
+            status="connected",
+        )
+
+    async def list_github_repositories(self) -> list[dict[str, object]]:
+        runtime_settings = await self.get_runtime_settings_for_source(ConnectorSource.GITHUB)
+        if not runtime_settings.github_token:
+            raise ValueError("Connect GitHub before loading repositories.")
+        return await self._fetch_github_repositories(
+            runtime_settings.github_token,
+            runtime_settings.github_base_url,
+        )
+
     async def get_runtime_connector(self, source: ConnectorSource) -> ConnectorAdapter:
         runtime_settings = await self.get_runtime_settings_for_source(source)
         connector = build_connector(source, runtime_settings)
@@ -259,6 +317,104 @@ class SettingsService:
                 )
             )
         return fields
+
+    async def _exchange_github_code_for_token(self, code: str) -> str:
+        payload = {
+            "client_id": self._base_settings.github_client_id,
+            "client_secret": self._base_settings.github_client_secret,
+            "code": code,
+            "redirect_uri": self._github_callback_url(),
+        }
+        headers = {"Accept": "application/json"}
+        async with httpx.AsyncClient(
+            base_url="https://github.com",
+            headers=headers,
+            timeout=10.0,
+        ) as client:
+            response = await client.post("/login/oauth/access_token", data=payload)
+
+        if not response.is_success:
+            raise ValueError(
+                f"GitHub authorization failed with status {response.status_code}."
+            )
+
+        data = response.json()
+        access_token = str(data.get("access_token") or "").strip()
+        if access_token:
+            return access_token
+
+        error = str(data.get("error") or "oauth_exchange_failed")
+        description = str(data.get("error_description") or "").strip()
+        message = error if not description else f"{error}: {description}"
+        raise ValueError(f"GitHub authorization failed: {message}")
+
+    async def _fetch_github_repositories(
+        self,
+        token: str,
+        base_url: str,
+    ) -> list[dict[str, object]]:
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        }
+        async with httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            headers=headers,
+            timeout=10.0,
+        ) as client:
+            response = await client.get(
+                "/user/repos",
+                params={
+                    "per_page": 100,
+                    "sort": "updated",
+                    "affiliation": "owner,collaborator,organization_member",
+                },
+            )
+
+        if not response.is_success:
+            raise ValueError(
+                f"GitHub repository listing failed with status {response.status_code}."
+            )
+
+        repositories = []
+        for item in response.json():
+            if not isinstance(item, dict):
+                continue
+            full_name = str(item.get("full_name") or "").strip()
+            if not full_name:
+                continue
+            repositories.append(
+                {
+                    "full_name": full_name,
+                    "private": bool(item.get("private")),
+                }
+            )
+        return repositories
+
+    def _github_callback_url(self) -> str:
+        base_url = self._base_settings.webhook_base_url.rstrip("/")
+        return f"{base_url}/settings/github/callback"
+
+    def _build_frontend_redirect(
+        self,
+        frontend_origin: str,
+        next_path: str,
+        *,
+        status: str,
+        message: str | None = None,
+    ) -> str:
+        query = {"github": status}
+        if message:
+            query["github_message"] = message
+        return urlunsplit(
+            (
+                urlsplit(frontend_origin).scheme,
+                urlsplit(frontend_origin).netloc,
+                next_path,
+                urlencode(query),
+                "",
+            )
+        )
 
     def _build_webhook_metadata(
         self,

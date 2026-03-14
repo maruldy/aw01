@@ -94,3 +94,8 @@ export interface WebhookProviderMetadata {
   recommended_events: string[];
   setup_notes: string[];
 }
+
+export interface GitHubRepository {
+  full_name: string;
+  private: boolean;
+}

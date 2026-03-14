@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     slack_signing_secret: str | None = None
 
     github_base_url: str = "https://api.github.com"
+    github_client_id: str | None = None
+    github_client_secret: str | None = None
     github_token: str | None = None
     github_repository: str | None = None
     github_webhook_secret: str | None = None
