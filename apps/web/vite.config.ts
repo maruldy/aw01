@@ -10,7 +10,7 @@ export default defineConfig({
       "/ingress": "http://localhost:8000",
       "/work-items": "http://localhost:8000",
       "/runs": "http://localhost:8000",
-      "/bootstrap": "http://localhost:8000",
+      "/backfill": "http://localhost:8000",
       "/knowledge": "http://localhost:8000",
       "/scheduler": "http://localhost:8000",
       "/settings": "http://localhost:8000",

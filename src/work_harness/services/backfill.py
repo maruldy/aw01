@@ -9,7 +9,7 @@ from work_harness.services.knowledge_store import KnowledgeStore
 
 
 @dataclass
-class BootstrapStatus:
+class BackfillStatus:
     state: str = "idle"
     processed: int = 0
     total: int = 0
@@ -18,10 +18,10 @@ class BootstrapStatus:
     last_error: str | None = None
 
 
-class BootstrapService:
+class BackfillService:
     def __init__(self, knowledge_store: KnowledgeStore) -> None:
         self._knowledge_store = knowledge_store
-        self._status = BootstrapStatus()
+        self._status = BackfillStatus()
         self._task: asyncio.Task | None = None
 
     async def trigger(self) -> dict:
@@ -31,7 +31,7 @@ class BootstrapService:
         return asdict(self._status)
 
     async def _run(self) -> None:
-        self._status = BootstrapStatus(
+        self._status = BackfillStatus(
             state="running",
             processed=0,
             total=1,
@@ -39,10 +39,10 @@ class BootstrapService:
         )
         try:
             record = AnalysisRecord(
-                ticket_key="BOOTSTRAP-0",
-                core_issue="Bootstrap initialized the knowledge store.",
-                summary="Bootstrap dry run completed.",
-                final_summary="Bootstrap completed without remote connector data.",
+                ticket_key="BACKFILL-0",
+                core_issue="Backfill initialized the knowledge store.",
+                summary="Backfill dry run completed.",
+                final_summary="Backfill completed without remote connector data.",
             )
             await self._knowledge_store.store_analysis(record)
             self._status.processed = 1
@@ -61,4 +61,3 @@ class BootstrapService:
 
     async def weekly_digest(self) -> dict:
         return {"job": "weekly_digest", "status": "ok"}
-

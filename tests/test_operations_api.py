@@ -7,7 +7,9 @@ def test_health_and_knowledge_stats_are_available() -> None:
     with TestClient(create_app()) as client:
         health_response = client.get("/health")
         assert health_response.status_code == 200
-        assert health_response.json()["ok"] is True
+        health_payload = health_response.json()
+        assert health_payload["ok"] is True
+        assert "backfill" in health_payload
 
         stats_response = client.get("/knowledge/stats")
         assert stats_response.status_code == 200
@@ -16,12 +18,12 @@ def test_health_and_knowledge_stats_are_available() -> None:
         assert "avg_iterations" in payload
 
 
-def test_bootstrap_and_scheduler_endpoints_return_state() -> None:
+def test_backfill_and_scheduler_endpoints_return_state() -> None:
     with TestClient(create_app()) as client:
-        trigger_response = client.post("/bootstrap/trigger")
+        trigger_response = client.post("/backfill/trigger")
         assert trigger_response.status_code == 200
 
-        status_response = client.get("/bootstrap/status")
+        status_response = client.get("/backfill/status")
         assert status_response.status_code == 200
         assert "state" in status_response.json()
 

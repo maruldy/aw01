@@ -1,23 +1,23 @@
-# Knowledge Bootstrap Flow
+# Knowledge Backfill Flow
 
 ## Purpose
 
-The bootstrap flow exists to avoid an empty knowledge base on first deployment. Instead of waiting for new live activity, the system should scan recent enterprise data, normalize it, summarize it, and store it so later agent runs can use similar past cases as context.
+The backfill flow exists to avoid an empty knowledge base on first deployment. Instead of waiting for new live activity, the system should scan recent enterprise data, normalize it, summarize it, and store it so later agent runs can use similar past cases as context.
 
 ## Current implementation
 
-The current code path lives in [bootstrap.py](/Users/maruldy/dev/workspace/aw01/src/work_harness/services/bootstrap.py). It is intentionally a safe dry run:
+The current code path lives in [backfill.py](../src/work_harness/services/backfill.py). It is intentionally a safe dry run:
 
-1. Mark bootstrap as `running`
+1. Mark backfill as `running`
 2. Create one synthetic `AnalysisRecord`
 3. Store it in SQLite through `KnowledgeStore`
-4. Mark bootstrap as `completed`
+4. Mark backfill as `completed`
 
 This proves the orchestration, scheduler registration, and storage path end to end without requiring live enterprise credentials during local development.
 
 ## Target production flow
 
-In production, the intended bootstrap pipeline is:
+In production, the intended backfill pipeline is:
 
 1. Validate connector credentials for Jira, Confluence, Slack, and GitHub
 2. Pull historical data for a bounded time range such as the last 3-6 months
@@ -30,7 +30,7 @@ In production, the intended bootstrap pipeline is:
 
 ```mermaid
 flowchart TD
-    A["Bootstrap triggered"] --> B["Validate connector credentials"]
+    A["Backfill triggered"] --> B["Validate connector credentials"]
     B --> C["Fetch historical Jira/Confluence/Slack/GitHub data"]
     C --> D["Normalize into internal activity records"]
     D --> E["Run lightweight analysis"]
@@ -40,7 +40,7 @@ flowchart TD
     G --> H
     H --> I{"More batches?"}
     I -->|Yes| C
-    I -->|No| J["Bootstrap completed"]
+    I -->|No| J["Backfill completed"]
 ```
 
 ## Why this matters in the work harness
