@@ -15,7 +15,7 @@ from work_harness.graph.supervisor import SupervisorService
 from work_harness.providers.openai_provider import OpenAIChatProvider
 from work_harness.providers.rule_based import RuleBasedChatProvider
 from work_harness.services.audit_log import AuditLog
-from work_harness.services.bootstrap import BootstrapService
+from work_harness.services.backfill import BackfillService
 from work_harness.services.harness import HarnessService
 from work_harness.services.knowledge_store import KnowledgeStore
 from work_harness.services.scheduler import SchedulerService
@@ -46,8 +46,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     knowledge_store = KnowledgeStore(app_settings.knowledge_db_path)
     audit_log = AuditLog()
     harness = HarnessService(supervisor, connectors, knowledge_store, audit_log)
-    bootstrap = BootstrapService(knowledge_store)
-    scheduler = SchedulerService(app_settings, bootstrap)
+    backfill = BackfillService(knowledge_store)
+    scheduler = SchedulerService(app_settings, backfill)
 
     async def ensure_runtime(app: FastAPI) -> None:
         if getattr(app.state, "runtime_ready", False):
@@ -60,19 +60,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.settings = app_settings
         app.state.harness = harness
-        app.state.bootstrap = bootstrap
+        app.state.backfill = backfill
         app.state.scheduler = scheduler
         app.state.knowledge_store = knowledge_store
         await ensure_runtime(app)
-        if app_settings.auto_bootstrap:
-            await bootstrap.trigger()
+        if app_settings.auto_backfill:
+            await backfill.trigger()
         yield
         scheduler.stop()
 
     app = FastAPI(title=app_settings.app_name, lifespan=lifespan)
     app.state.settings = app_settings
     app.state.harness = harness
-    app.state.bootstrap = bootstrap
+    app.state.backfill = backfill
     app.state.scheduler = scheduler
     app.state.knowledge_store = knowledge_store
     app.add_middleware(
@@ -87,8 +87,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, Any]:
         await ensure_runtime(app)
         stats = await app.state.knowledge_store.get_stats()
-        bootstrap_status = await app.state.bootstrap.status()
-        return {"ok": True, "knowledge": stats, "bootstrap": bootstrap_status}
+        backfill_status = await app.state.backfill.status()
+        return {"ok": True, "knowledge": stats, "backfill": backfill_status}
 
     @app.post("/ingress/{source}", status_code=202)
     async def ingress(source: str, request: IngressRequest) -> dict[str, Any]:
@@ -139,15 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Run not found")
         return run.model_dump(mode="json")
 
-    @app.post("/bootstrap/trigger")
-    async def trigger_bootstrap() -> dict[str, Any]:
+    @app.post("/backfill/trigger")
+    async def trigger_backfill() -> dict[str, Any]:
         await ensure_runtime(app)
-        return await app.state.bootstrap.trigger()
+        return await app.state.backfill.trigger()
 
-    @app.get("/bootstrap/status")
-    async def bootstrap_status() -> dict[str, Any]:
+    @app.get("/backfill/status")
+    async def backfill_status() -> dict[str, Any]:
         await ensure_runtime(app)
-        return await app.state.bootstrap.status()
+        return await app.state.backfill.status()
 
     @app.get("/knowledge/stats")
     async def knowledge_stats() -> dict[str, Any]:

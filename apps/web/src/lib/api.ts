@@ -51,7 +51,7 @@ export async function getKnowledgeRecent() {
 }
 
 export async function getHealth() {
-  return request<{ ok: boolean; bootstrap: Record<string, unknown>; knowledge: Record<string, unknown> }>("/health");
+  return request<{ ok: boolean; backfill: Record<string, unknown>; knowledge: Record<string, unknown> }>("/health");
 }
 
 export async function getAuditRecent() {
@@ -70,6 +70,6 @@ export async function validateProfile(source: string) {
   return request<{ ok: boolean; source: string }>(`/settings/validate/${source}`, { method: "POST" });
 }
 
-export async function triggerBootstrap() {
-  return request<Record<string, unknown>>("/bootstrap/trigger", { method: "POST" });
+export async function triggerBackfill() {
+  return request<Record<string, unknown>>("/backfill/trigger", { method: "POST" });
 }

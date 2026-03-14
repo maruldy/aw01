@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { getProfiles, getSchedulerJobs, triggerBootstrap, validateProfile } from "../lib/api";
+import { getProfiles, getSchedulerJobs, triggerBackfill, validateProfile } from "../lib/api";
 import type { ConnectorProfile } from "../lib/types";
 
 export function SettingsPage() {
@@ -25,8 +25,8 @@ export function SettingsPage() {
     }));
   }
 
-  async function handleBootstrap() {
-    await triggerBootstrap();
+  async function handleBackfill() {
+    await triggerBackfill();
   }
 
   return (
@@ -39,10 +39,10 @@ export function SettingsPage() {
           </div>
           <button
             type="button"
-            onClick={handleBootstrap}
+            onClick={handleBackfill}
             className="rounded-[18px] bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px]"
           >
-            Trigger bootstrap dry run
+            Trigger backfill dry run
           </button>
         </div>
       </section>

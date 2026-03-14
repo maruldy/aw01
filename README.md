@@ -7,7 +7,7 @@ Event-driven AI work harness for enterprise operations. The system is built arou
 - FastAPI backend with a LangGraph supervisor graph
 - Self-hosted Jira and Confluence adapters, plus Slack Enterprise Grid and GitHub Enterprise Cloud adapters
 - Safety harness with tool allowlist and approval-aware action policy
-- SQLite-backed knowledge store and bootstrap/scheduler services
+- SQLite-backed knowledge store and backfill/scheduler services
 - React + Vite frontend with inbox, runs, knowledge, and settings views
 - Local development helpers: `.env.example`, `Makefile`, Docker, and GitHub Actions CI
 
@@ -30,4 +30,4 @@ The frontend runs on `http://localhost:5173` and the backend on `http://localhos
 - MCP is not required by the core runtime. SaaS and self-hosted system access goes through typed connector adapters; local side effects go through an allowlisted CLI registry.
 - The UI is push-first: agents create work items, and the operator responds with `accept`, `reject`, `advise`, or `defer`.
 
-Bootstrap details are documented in [knowledge_bootstrap.md](/Users/maruldy/dev/workspace/aw01/docs/knowledge_bootstrap.md).
+Backfill details are documented in [knowledge_backfill.md](docs/knowledge_backfill.md).
