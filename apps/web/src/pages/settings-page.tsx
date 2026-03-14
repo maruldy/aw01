@@ -1,40 +1,83 @@
 import { useEffect, useState } from "react";
 
 import {
+  getGitHubRepositories,
   getProfiles,
   getSchedulerJobs,
+  startGitHubConnection,
   updateConnectorConfig,
   updateSubscriptions,
   validateProfile
 } from "../lib/api";
-import type { ConnectorProfile } from "../lib/types";
+import type { ConnectorProfile, GitHubRepository } from "../lib/types";
 
 export function SettingsPage() {
   const [profiles, setProfiles] = useState<ConnectorProfile[]>([]);
   const [validation, setValidation] = useState<Record<string, string>>({});
   const [draftConfigValues, setDraftConfigValues] = useState<Record<string, Record<string, string>>>({});
   const [draftSelections, setDraftSelections] = useState<Record<string, string[]>>({});
+  const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
+  const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
   const [jobs, setJobs] = useState<Array<Record<string, string>>>([]);
+
+  async function applyProfiles(nextProfiles: ConnectorProfile[]) {
+    setProfiles(nextProfiles);
+    setDraftConfigValues(
+      Object.fromEntries(
+        nextProfiles.map((profile) => [
+          profile.source,
+          Object.fromEntries(
+            profile.config_fields.map((field) => [field.key, field.value ?? ""])
+          )
+        ])
+      )
+    );
+    setDraftSelections(
+      Object.fromEntries(
+        nextProfiles.map((profile) => [profile.source, profile.selected_event_keys])
+      )
+    );
+
+    const githubProfile = nextProfiles.find((profile) => profile.source === "github");
+    if (!githubProfile || githubProfile.missing_fields.includes("GITHUB_TOKEN")) {
+      setGitHubRepositories([]);
+      return;
+    }
+
+    try {
+      const repositoriesPayload = await getGitHubRepositories();
+      setGitHubRepositories(repositoriesPayload.repositories);
+    } catch {
+      setGitHubRepositories([]);
+    }
+  }
 
   useEffect(() => {
     async function load() {
+      const params = new URLSearchParams(window.location.search);
+      const githubStatus = params.get("github");
+      const githubMessage = params.get("github_message");
+      if (githubStatus === "connected") {
+        setValidation((previous) => ({
+          ...previous,
+          github: githubMessage ?? "GitHub connected. Select a repository to finish setup."
+        }));
+      } else if (githubStatus === "error") {
+        setValidation((previous) => ({
+          ...previous,
+          github: githubMessage ?? "GitHub connection failed."
+        }));
+      }
+      if (githubStatus) {
+        params.delete("github");
+        params.delete("github_message");
+        const nextSearch = params.toString();
+        const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+        window.history.replaceState({}, "", nextUrl);
+      }
+
       const [profilePayload, jobsPayload] = await Promise.all([getProfiles(), getSchedulerJobs()]);
-      setProfiles(profilePayload.profiles);
-      setDraftConfigValues(
-        Object.fromEntries(
-          profilePayload.profiles.map((profile) => [
-            profile.source,
-            Object.fromEntries(
-              profile.config_fields.map((field) => [field.key, field.value ?? ""])
-            )
-          ])
-        )
-      );
-      setDraftSelections(
-        Object.fromEntries(
-          profilePayload.profiles.map((profile) => [profile.source, profile.selected_event_keys])
-        )
-      );
+      await applyProfiles(profilePayload.profiles);
       setJobs(jobsPayload.jobs);
     }
     void load();
@@ -42,17 +85,9 @@ export function SettingsPage() {
 
   async function handleValidate(source: string) {
     const result = await validateProfile(source);
-    setProfiles((previous) => previous.map((profile) => (profile.source === source ? result : profile)));
-    setDraftConfigValues((previous) => ({
-      ...previous,
-      [source]: Object.fromEntries(
-        result.config_fields.map((field) => [field.key, field.value ?? ""])
-      )
-    }));
-    setDraftSelections((previous) => ({
-      ...previous,
-      [source]: result.selected_event_keys
-    }));
+    await applyProfiles(
+      profiles.map((profile) => (profile.source === source ? result : profile))
+    );
     setValidation((previous) => ({
       ...previous,
       [source]: result.ok ? "Connected" : "Checked safely with read-only probes"
@@ -61,16 +96,15 @@ export function SettingsPage() {
 
   async function handleSaveConfig(source: string) {
     const result = await updateConnectorConfig(source, draftConfigValues[source] ?? {});
-    setProfiles((previous) => previous.map((profile) => (profile.source === source ? result : profile)));
-    setDraftConfigValues((previous) => ({
-      ...previous,
-      [source]: Object.fromEntries(
-        result.config_fields.map((field) => [field.key, field.value ?? ""])
-      )
-    }));
+    await applyProfiles(
+      profiles.map((profile) => (profile.source === source ? result : profile))
+    );
     setValidation((previous) => ({
       ...previous,
-      [source]: "Configuration saved. Run validate to refresh capability probes."
+      [source]:
+        source === "github"
+          ? "Repository saved. Run validate to refresh capability probes."
+          : "Configuration saved. Run validate to refresh capability probes."
     }));
   }
 
@@ -106,6 +140,24 @@ export function SettingsPage() {
         [key]: value
       }
     }));
+  }
+
+  async function handleConnectGitHub() {
+    setIsConnectingGitHub(true);
+    try {
+      const payload = await startGitHubConnection(
+        window.location.origin,
+        window.location.pathname
+      );
+      window.location.assign(payload.authorization_url);
+    } catch (error) {
+      setValidation((previous) => ({
+        ...previous,
+        github:
+          error instanceof Error ? error.message : "GitHub connection could not be started."
+      }));
+      setIsConnectingGitHub(false);
+    }
   }
 
   return (
@@ -166,39 +218,107 @@ export function SettingsPage() {
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <div className="rounded-[18px] border border-black/5 bg-white/90 p-4 lg:col-span-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="eyebrow">Connection inputs</p>
-                        <p className="mt-2 text-sm text-ink/70">
-                          Store only the minimum credentials and targets needed for safe read-only probing.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveConfig(profile.source)}
-                        className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white"
-                      >
-                        Save config
-                      </button>
-                    </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      {profile.config_fields.map((field) => (
-                        <label key={field.key} className="rounded-[18px] bg-canvas px-4 py-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-semibold text-ink">{field.label}</span>
-                            {field.sensitive && field.is_set ? <span className="pill">stored</span> : null}
+                    {profile.source === "github" ? (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="eyebrow">Browser connection</p>
+                            <p className="mt-2 text-sm text-ink/70">
+                              Connect through GitHub in the browser, then choose which repository this harness should watch.
+                            </p>
                           </div>
-                          <input
-                            type={field.sensitive ? "password" : "text"}
-                            value={draftConfigValues[profile.source]?.[field.key] ?? ""}
-                            onChange={(event) => updateConfigValue(profile.source, field.key, event.target.value)}
-                            placeholder={field.sensitive && field.is_set ? "Leave blank to keep current value" : field.placeholder}
-                            className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal"
-                          />
-                          <p className="mt-2 text-xs text-ink/55">{field.help_text}</p>
-                        </label>
-                      ))}
-                    </div>
+                          <button
+                            type="button"
+                            onClick={handleConnectGitHub}
+                            disabled={isConnectingGitHub}
+                            className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-signal/60"
+                          >
+                            {isConnectingGitHub ? "Redirecting..." : profile.identity ? "Reconnect GitHub" : "Connect GitHub"}
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <div className="rounded-[18px] bg-canvas px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-sm font-semibold text-ink">Connected account</span>
+                              {profile.identity ? <span className="pill">connected</span> : null}
+                            </div>
+                            <p className="mt-3 text-sm text-ink/70">
+                              {profile.identity ?? "No GitHub account is connected yet."}
+                            </p>
+                          </div>
+
+                          <label className="rounded-[18px] bg-canvas px-4 py-3">
+                            <span className="text-sm font-semibold text-ink">Scoped repository</span>
+                            <select
+                              value={draftConfigValues[profile.source]?.github_repository ?? ""}
+                              onChange={(event) => updateConfigValue(profile.source, "github_repository", event.target.value)}
+                              disabled={githubRepositories.length === 0}
+                              className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal disabled:bg-black/5"
+                            >
+                              <option value="">Select a repository</option>
+                              {githubRepositories.map((repository) => (
+                                <option key={repository.full_name} value={repository.full_name}>
+                                  {repository.full_name}{repository.private ? " (private)" : ""}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-2 text-xs text-ink/55">
+                              {githubRepositories.length > 0
+                                ? "Choose the repository that should receive GitHub webhook events."
+                                : "Connect GitHub first to load repositories you can access."}
+                            </p>
+                          </label>
+                        </div>
+
+                        <div className="mt-4 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveConfig(profile.source)}
+                            disabled={!draftConfigValues[profile.source]?.github_repository}
+                            className="rounded-[16px] bg-ink px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-ink/60"
+                          >
+                            Save repository
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="eyebrow">Connection inputs</p>
+                            <p className="mt-2 text-sm text-ink/70">
+                              Store only the minimum credentials and targets needed for safe read-only probing.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveConfig(profile.source)}
+                            className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white"
+                          >
+                            Save config
+                          </button>
+                        </div>
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          {profile.config_fields.map((field) => (
+                            <label key={field.key} className="rounded-[18px] bg-canvas px-4 py-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-sm font-semibold text-ink">{field.label}</span>
+                                {field.sensitive && field.is_set ? <span className="pill">stored</span> : null}
+                              </div>
+                              <input
+                                type={field.sensitive ? "password" : "text"}
+                                value={draftConfigValues[profile.source]?.[field.key] ?? ""}
+                                onChange={(event) => updateConfigValue(profile.source, field.key, event.target.value)}
+                                placeholder={field.sensitive && field.is_set ? "Leave blank to keep current value" : field.placeholder}
+                                className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal"
+                              />
+                              <p className="mt-2 text-xs text-ink/55">{field.help_text}</p>
+                            </label>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {profile.webhook ? (

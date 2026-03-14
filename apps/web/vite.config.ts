@@ -1,19 +1,22 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
+const apiTarget = "http://127.0.0.1:8000";
+
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      "/health": "http://localhost:8000",
-      "/ingress": "http://localhost:8000",
-      "/work-items": "http://localhost:8000",
-      "/runs": "http://localhost:8000",
-      "/knowledge": "http://localhost:8000",
-      "/scheduler": "http://localhost:8000",
-      "/settings": "http://localhost:8000",
-      "/audit": "http://localhost:8000"
+      "/health": apiTarget,
+      "/ingress": apiTarget,
+      "/work-items": apiTarget,
+      "/runs/": apiTarget,
+      "/backfill": apiTarget,
+      "/knowledge/": apiTarget,
+      "/scheduler/": apiTarget,
+      "/settings/": apiTarget,
+      "/audit/": apiTarget
     }
   }
 });

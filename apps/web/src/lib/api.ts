@@ -1,4 +1,4 @@
-import type { ConnectorProfile, ExecutionRun, WorkItem } from "./types";
+import type { ConnectorProfile, ExecutionRun, GitHubRepository, WorkItem } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -11,7 +11,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    let detail = `Request failed: ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (typeof payload.detail === "string" && payload.detail) {
+        detail = payload.detail;
+      }
+    } catch {
+      // Ignore non-JSON error responses.
+    }
+    throw new Error(detail);
   }
 
   return (await response.json()) as T;
@@ -78,4 +87,15 @@ export async function updateConnectorConfig(source: string, values: Record<strin
     method: "POST",
     body: JSON.stringify({ values })
   });
+}
+
+export async function startGitHubConnection(frontendOrigin: string, nextPath: string) {
+  return request<{ authorization_url: string }>("/settings/github/connect/start", {
+    method: "POST",
+    body: JSON.stringify({ frontend_origin: frontendOrigin, next_path: nextPath })
+  });
+}
+
+export async function getGitHubRepositories() {
+  return request<{ repositories: GitHubRepository[] }>("/settings/github/repositories");
 }

@@ -21,9 +21,11 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
 
     async def validate(self) -> dict[str, object]:
         missing_fields = []
-        if not self._settings.github_token:
+        token_missing = not self._settings.github_token
+        repository_missing = not self._settings.github_repository
+        if token_missing:
             missing_fields.append("GITHUB_TOKEN")
-        if not self._settings.github_repository:
+        if repository_missing:
             missing_fields.append("GITHUB_REPOSITORY")
 
         capabilities = [
@@ -32,7 +34,7 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                 label="Authenticate to GitHub",
                 status=(
                     CapabilityStatus.MISSING_CONFIG
-                    if missing_fields
+                    if token_missing
                     else CapabilityStatus.UNKNOWN
                 ),
                 detail="Validate the GitHub token against the REST API.",
@@ -42,32 +44,39 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                 label="Read repository",
                 status=(
                     CapabilityStatus.MISSING_CONFIG
-                    if missing_fields
+                    if token_missing or repository_missing
                     else CapabilityStatus.UNKNOWN
                 ),
-                detail="Confirm read access to the configured repository.",
+                detail=(
+                    "Select a repository after connecting GitHub."
+                    if repository_missing
+                    else "Confirm read access to the configured repository."
+                ),
             ),
             ConnectorCapability(
                 key="pull_request_read",
                 label="Read pull requests",
                 status=(
                     CapabilityStatus.MISSING_CONFIG
-                    if missing_fields
+                    if token_missing or repository_missing
                     else CapabilityStatus.UNKNOWN
                 ),
-                detail="Confirm read access to pull request metadata.",
+                detail=(
+                    "Select a repository after connecting GitHub."
+                    if repository_missing
+                    else "Confirm read access to pull request metadata."
+                ),
             ),
         ]
 
         identity = None
         evidence: list[str] = []
-        if not missing_fields:
+        if not token_missing:
             headers = {
                 "Authorization": f"Bearer {self._settings.github_token}",
                 "Accept": "application/vnd.github+json",
             }
             base_url = self._settings.github_base_url.rstrip("/")
-            repository = self._settings.github_repository
             try:
                 async with httpx.AsyncClient(
                     base_url=base_url,
@@ -94,43 +103,59 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                         if header_value:
                             evidence.append(f"{header_name}: {header_value}")
 
-                    repo_response = await client.get(f"/repos/{repository}")
-                    if repo_response.is_success:
-                        capabilities[1].status = CapabilityStatus.VERIFIED
-                        capabilities[1].detail = "The token can read the configured repository."
-                    else:
-                        capabilities[1].status = CapabilityStatus.BLOCKED
-                        capabilities[1].detail = (
-                            f"Repository read probe failed with status {repo_response.status_code}."
-                        )
+                    if not repository_missing:
+                        repository = self._settings.github_repository
+                        repo_response = await client.get(f"/repos/{repository}")
+                        if repo_response.is_success:
+                            capabilities[1].status = CapabilityStatus.VERIFIED
+                            capabilities[1].detail = "The token can read the configured repository."
+                        else:
+                            capabilities[1].status = CapabilityStatus.BLOCKED
+                            capabilities[1].detail = (
+                                "Repository read probe failed with status "
+                                f"{repo_response.status_code}."
+                            )
 
-                    pulls_response = await client.get(
-                        f"/repos/{repository}/pulls",
-                        params={"per_page": 1, "state": "open"},
-                    )
-                    if pulls_response.is_success:
-                        capabilities[2].status = CapabilityStatus.VERIFIED
-                        capabilities[2].detail = "The token can read pull request metadata."
-                    else:
-                        capabilities[2].status = CapabilityStatus.BLOCKED
-                        capabilities[2].detail = (
-                            f"Pull request probe failed with status {pulls_response.status_code}."
+                        pulls_response = await client.get(
+                            f"/repos/{repository}/pulls",
+                            params={"per_page": 1, "state": "open"},
                         )
+                        if pulls_response.is_success:
+                            capabilities[2].status = CapabilityStatus.VERIFIED
+                            capabilities[2].detail = "The token can read pull request metadata."
+                        else:
+                            capabilities[2].status = CapabilityStatus.BLOCKED
+                            capabilities[2].detail = (
+                                "Pull request probe failed with status "
+                                f"{pulls_response.status_code}."
+                            )
             except httpx.HTTPError as exc:
                 capabilities[0].status = CapabilityStatus.BLOCKED
                 capabilities[0].detail = f"Authentication probe failed: {exc}"
-                capabilities[1].status = CapabilityStatus.UNKNOWN
-                capabilities[2].status = CapabilityStatus.UNKNOWN
+                if not repository_missing:
+                    capabilities[1].status = CapabilityStatus.UNKNOWN
+                    capabilities[2].status = CapabilityStatus.UNKNOWN
 
-        configured = not missing_fields and capabilities[0].status == CapabilityStatus.VERIFIED
-        message = (
-            "GitHub Enterprise Cloud is ready for safe repo-scoped alert routing."
-            if configured
-            else (
+        configured = (
+            not repository_missing
+            and capabilities[0].status == CapabilityStatus.VERIFIED
+            and capabilities[1].status == CapabilityStatus.VERIFIED
+            and capabilities[2].status == CapabilityStatus.VERIFIED
+        )
+        if token_missing:
+            message = (
                 "Connect GitHub Enterprise Cloud and verify repo read access "
                 "before enabling live alerts."
             )
-        )
+        elif repository_missing:
+            message = "GitHub account connected. Select a repository to finish setup."
+        elif configured:
+            message = "GitHub Enterprise Cloud is ready for safe repo-scoped alert routing."
+        else:
+            message = (
+                "GitHub account is connected, but the selected repository "
+                "could not be verified."
+            )
         return {
             "ok": configured,
             "configured": configured,

@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
@@ -44,6 +44,11 @@ class IngressRequest(BaseModel):
 
 class WorkItemsResponse(BaseModel):
     items: list[dict[str, Any]]
+
+
+class GitHubConnectStartRequest(BaseModel):
+    frontend_origin: str
+    next_path: str = "/settings"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -256,6 +261,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload.values,
         )
         return profile.model_dump(mode="json")
+
+    @app.post("/settings/github/connect/start")
+    async def start_github_connect(
+        payload: GitHubConnectStartRequest,
+    ) -> dict[str, str]:
+        await ensure_runtime(app)
+        try:
+            authorization_url = await app.state.settings_service.start_github_connection(
+                payload.frontend_origin,
+                payload.next_path,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"authorization_url": authorization_url}
+
+    @app.get("/settings/github/callback")
+    async def complete_github_connect(code: str, state: str) -> RedirectResponse:
+        await ensure_runtime(app)
+        try:
+            redirect_url = await app.state.settings_service.complete_github_connection(
+                code,
+                state,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return RedirectResponse(redirect_url)
+
+    @app.get("/settings/github/repositories")
+    async def list_github_repositories() -> dict[str, Any]:
+        await ensure_runtime(app)
+        try:
+            repositories = await app.state.settings_service.list_github_repositories()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"repositories": repositories}
 
     async def _receive_webhook(
         provider: WebhookProvider,
