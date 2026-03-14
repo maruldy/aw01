@@ -147,6 +147,7 @@ class SupervisorService:
             external_id=event.external_id,
             actor=event.actor,
             proposal=proposal,
+            metadata=event.metadata,
         )
         run = ExecutionRun(
             thread_id=work_item.thread_id,

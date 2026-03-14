@@ -8,6 +8,7 @@ const ko = {
   "nav.settings": "설정",
   "nav.pushFirst": "Push-first 운영",
   "nav.pushFirstDesc": "에이전트가 다음 행동을 제안합니다. 승인, 거부, 조언은 사람이 담당합니다.",
+  "nav.disconnectedHint": "미연결",
 
   // work item list
   "workList.eyebrow": "AI 인박스",
@@ -25,21 +26,20 @@ const ko = {
   "detail.reject": "거부",
   "detail.advise": "조언",
   "detail.defer": "보류",
+  "detail.execute": "실행",
+  "detail.actionSuccess": "작업 완료",
+  "detail.actionFailed": "작업 실패",
+  "detail.actionSkipped": "실행할 작업 없음",
   "detail.operatorNote": "최근 운영자 메모",
 
   // inbox page
   "inbox.eyebrow": "감독 콘솔",
-  "inbox.heroTitle": "운영자에게 작업을 전달합니다.",
-  "inbox.heroAccent": "승인 경계에서 사람의 통제를 유지하세요.",
+  "inbox.title": "수신 작업",
   "inbox.slackMention": "Slack 멘션",
   "inbox.jiraUpdate": "Jira 업데이트",
   "inbox.githubReview": "GitHub 리뷰 요청",
   "inbox.injecting": "주입 중...",
   "inbox.simulate": "인바운드 작업 시뮬레이션",
-  "inbox.connectorRequired": "커넥터 설정 필요",
-  "inbox.noEvents": "실제 사내 이벤트는 아직 들어오지 않습니다.",
-  "inbox.disconnectedMsg": "연동이 비어 있습니다. 설정에서 자격증명을 연결하면 실제 Jira, Confluence, Slack, GitHub 활동이 인박스로 유입됩니다. 지금은 데모 이벤트만 주입할 수 있습니다.",
-  "inbox.openWizard": "설정 마법사 열기",
 
   // runs page
   "runs.eyebrow": "실행 추적",
@@ -87,12 +87,15 @@ const ko = {
   "settings.saveConfig": "설정 저장",
   "settings.stored": "저장됨",
   "settings.keepCurrent": "현재 값을 유지하려면 빈칸으로 두세요",
+  "settings.changeValue": "값 변경",
   "settings.webhookIntake": "웹훅 수신",
   "settings.callbackUrl": "콜백 URL",
   "settings.verification": "검증",
   "settings.secretEnv": "시크릿 환경변수",
   "settings.recommendedEvents": "권장 이벤트",
   "settings.capabilityProbe": "기능 프로브",
+  "settings.allowedActions": "허용 액션",
+  "settings.noActionsAvailable": "사용 가능한 액션이 없습니다.",
   "settings.alertSubscriptions": "알림 구독",
   "settings.recommended": "권장",
   "settings.blocked": "차단됨",
@@ -107,6 +110,17 @@ const ko = {
   "settings.configSaved": "설정이 저장되었습니다. 검증을 실행하여 기능 프로브를 새로고침하세요.",
   "settings.subscriptionSaved": "구독 선택이 저장되었습니다.",
   "settings.githubStartFailed": "GitHub 연결을 시작할 수 없습니다.",
+
+  // github repos
+  "settings.recommendedRepos": "추천 저장소",
+  "settings.recommendedReposDesc": "최근 GitHub 활동 기반 추천",
+  "settings.activityCount": "활동",
+  "settings.addRepoManually": "저장소 직접 추가",
+  "settings.addRepoPlaceholder": "org/repo",
+  "settings.addRepo": "추가",
+  "settings.loadingRepos": "추천 저장소 불러오는 중...",
+  "settings.selectedRepos": "선택된 저장소",
+  "settings.noReposSelected": "선택된 저장소가 없습니다.",
 
   // language
   "lang.switch": "EN",

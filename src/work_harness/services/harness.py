@@ -53,11 +53,13 @@ class HarnessService:
         connectors: dict[ConnectorSource, ConnectorAdapter],
         audit_log: AuditLog,
         settings_service: SettingsService,
+        chat_provider: object | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._connectors = connectors
         self._audit_log = audit_log
         self._settings_service = settings_service
+        self._chat_provider = chat_provider
         self._work_items = InMemoryWorkItemRepository()
         self._runs = InMemoryRunRepository()
         self._bus = RunEventBus()
@@ -162,7 +164,136 @@ class HarnessService:
             {"work_item_id": item.id, **payload.model_dump(mode="json")},
         )
         await self._bus.publish(item.thread_id, event)
+
+        if (
+            payload.decision == DecisionType.ACCEPT
+            and payload.comment
+            and self._chat_provider
+            and item.source in self._connectors
+        ):
+            action_event = await self._execute_steering(
+                item, payload.comment,
+            )
+            item.action_result = action_event
+            item.updated_at = datetime.now(tz=UTC)
+            await self._work_items.upsert(item)
+            run.events.append(action_event)
+            run.updated_at = datetime.now(tz=UTC)
+            await self._runs.upsert(run)
+            await self._bus.publish(item.thread_id, action_event)
+
         return item
+
+    async def _execute_steering(
+        self,
+        item: WorkItem,
+        comment: str,
+    ) -> dict[str, Any]:
+        logger.info(
+            "Steering: item=%s comment=%s",
+            item.id, comment[:80],
+        )
+        allowed = await self._settings_service.get_allowed_actions(
+            item.source,
+        )
+        if not allowed:
+            logger.info("Steering skipped: no allowed actions for %s", item.source.value)
+            return {
+                "type": "steering_skip",
+                "reasoning": f"No actions enabled for {item.source.value}. "
+                "Enable actions in Settings.",
+            }
+
+        repo = ""
+        if isinstance(item.metadata, dict):
+            repo_meta = item.metadata.get("repository")
+            if isinstance(repo_meta, dict):
+                repo = str(repo_meta.get("full_name", ""))
+
+        actions_str = ", ".join(allowed)
+        prompt = (
+            f"Source: {item.source.value}\n"
+            f"Title: {item.title}\n"
+            f"Body: {item.body}\n"
+            f"Repository: {repo}\n"
+            f"Operator instruction: {comment}\n\n"
+            f"Available actions for {item.source.value}: "
+            f"{actions_str}\n"
+            f"If the instruction does not match any available "
+            f"action, return action='none'.\n"
+            f"For create_issue, include repository, title, "
+            f"and body in params."
+        )
+        schema = {
+            "title": "RemoteActionPlan",
+            "type": "object",
+            "properties": {
+                "action": {"type": "string"},
+                "params": {"type": "object"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["action", "params", "reasoning"],
+        }
+        try:
+            completion = await self._chat_provider.complete_json(
+                prompt, schema,
+            )
+        except Exception:
+            logger.exception("Steering LLM failed: item=%s", item.id)
+            return {
+                "type": "steering_error",
+                "message": "LLM interpretation failed.",
+            }
+
+        plan = completion.data or {}
+        action = plan.get("action", "none")
+        logger.info(
+            "Steering plan: action=%s params=%s",
+            action, plan.get("params"),
+        )
+
+        if action == "none":
+            return {
+                "type": "steering_skip",
+                "reasoning": plan.get("reasoning", ""),
+            }
+
+        if action not in allowed:
+            logger.warning(
+                "Steering blocked: action=%s not in allowed=%s",
+                action, allowed,
+            )
+            return {
+                "type": "steering_error",
+                "action": action,
+                "message": f"Action '{action}' is not enabled. "
+                f"Allowed: {', '.join(allowed)}",
+            }
+
+        connector = self._connectors[item.source]
+        params = plan.get("params", {})
+        try:
+            result = await connector.execute_remote_action(
+                action, params,
+            )
+        except Exception:
+            logger.exception(
+                "Steering action failed: action=%s item=%s",
+                action, item.id,
+            )
+            return {
+                "type": "steering_error",
+                "action": action,
+                "message": "Remote action failed.",
+            }
+
+        logger.info("Steering result: %s", result)
+        return {
+            "type": "steering_action",
+            "action": action,
+            "params": params,
+            "result": result,
+        }
 
     async def get_run(self, thread_id: str) -> ExecutionRun | None:
         return await self._runs.get(thread_id)

@@ -12,7 +12,10 @@ logger = logging.getLogger("work_harness.providers.openai")
 
 class OpenAIChatProvider:
     def __init__(self, settings: Settings) -> None:
-        kwargs = {"model": settings.openai_model, "temperature": 1.0}
+        kwargs: dict[str, object] = {
+            "model": settings.openai_model,
+            "temperature": 0,
+        }
         if settings.openai_api_key:
             kwargs["api_key"] = settings.openai_api_key
         if settings.openai_api_base:
@@ -27,9 +30,14 @@ class OpenAIChatProvider:
         try:
             structured = self._model.with_structured_output(schema)
             data = await structured.ainvoke(prompt)
-            logger.info("OpenAI completion success: schema=%s", schema.get("title"))
+            logger.info(
+                "OpenAI completion success: schema=%s",
+                schema.get("title"),
+            )
             return CompletionResult(content="", data=data)
         except Exception:
-            logger.exception("OpenAI completion failed: schema=%s", schema.get("title"))
+            logger.exception(
+                "OpenAI completion failed: schema=%s",
+                schema.get("title"),
+            )
             raise
-

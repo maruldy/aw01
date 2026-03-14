@@ -1,4 +1,4 @@
-import type { ConnectorProfile, ExecutionRun, GitHubRepository, WorkItem } from "./types";
+import type { ConnectorProfile, ExecutionRun, GitHubRecommendedRepo, GitHubRepository, WorkItem } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -82,6 +82,19 @@ export async function updateSubscriptions(source: string, selectedEventKeys: str
   });
 }
 
+export async function getAllowedActions(source: string) {
+  return request<{ source: string; available: Array<{ key: string; label: string; description: string }>; allowed: string[] }>(
+    `/settings/actions/${source}`
+  );
+}
+
+export async function updateAllowedActions(source: string, allowed: string[]) {
+  return request<{ source: string; available: Array<{ key: string; label: string; description: string }>; allowed: string[] }>(
+    `/settings/actions/${source}`,
+    { method: "POST", body: JSON.stringify({ allowed }) }
+  );
+}
+
 export async function updateConnectorConfig(source: string, values: Record<string, string>) {
   return request<ConnectorProfile>(`/settings/config/${source}`, {
     method: "POST",
@@ -98,4 +111,10 @@ export async function startGitHubConnection(frontendOrigin: string, nextPath: st
 
 export async function getGitHubRepositories() {
   return request<{ repositories: GitHubRepository[] }>("/settings/github/repositories");
+}
+
+export async function getGitHubRecommendedRepos() {
+  return request<{ repositories: GitHubRecommendedRepo[] }>(
+    "/settings/github/recommended-repos"
+  );
 }

@@ -10,6 +10,7 @@ const en: Record<TranslationKey, string> = {
   "nav.settings": "Settings",
   "nav.pushFirst": "Push-first operations",
   "nav.pushFirstDesc": "Let agents frame the next move. Keep human intervention for approval, rejection, and advice.",
+  "nav.disconnectedHint": "not connected",
 
   // work item list
   "workList.eyebrow": "AI Inbox",
@@ -27,21 +28,20 @@ const en: Record<TranslationKey, string> = {
   "detail.reject": "Reject",
   "detail.advise": "Advise",
   "detail.defer": "Defer",
+  "detail.execute": "Execute",
+  "detail.actionSuccess": "Action completed",
+  "detail.actionFailed": "Action failed",
+  "detail.actionSkipped": "No action to execute",
   "detail.operatorNote": "Latest operator note",
 
   // inbox page
   "inbox.eyebrow": "Supervisor Console",
-  "inbox.heroTitle": "Push work to the operator.",
-  "inbox.heroAccent": "Keep human control at the approval edge.",
+  "inbox.title": "Incoming work",
   "inbox.slackMention": "Slack mention",
   "inbox.jiraUpdate": "Jira update",
   "inbox.githubReview": "GitHub review request",
   "inbox.injecting": "Injecting...",
   "inbox.simulate": "Simulate inbound work",
-  "inbox.connectorRequired": "Connector setup required",
-  "inbox.noEvents": "No real enterprise events have arrived yet.",
-  "inbox.disconnectedMsg": "connectors are not configured. Connect credentials in Settings to start receiving real Jira, Confluence, Slack, and GitHub activity. For now, you can only inject demo events.",
-  "inbox.openWizard": "Open setup wizard",
 
   // runs page
   "runs.eyebrow": "Execution runs",
@@ -89,12 +89,15 @@ const en: Record<TranslationKey, string> = {
   "settings.saveConfig": "Save config",
   "settings.stored": "stored",
   "settings.keepCurrent": "Leave blank to keep current value",
+  "settings.changeValue": "Change value",
   "settings.webhookIntake": "Webhook intake",
   "settings.callbackUrl": "Callback URL",
   "settings.verification": "Verification",
   "settings.secretEnv": "Secret env",
   "settings.recommendedEvents": "Recommended events",
   "settings.capabilityProbe": "Capability probe",
+  "settings.allowedActions": "Allowed actions",
+  "settings.noActionsAvailable": "No actions available.",
   "settings.alertSubscriptions": "Alert subscriptions",
   "settings.recommended": "recommended",
   "settings.blocked": "blocked",
@@ -109,6 +112,17 @@ const en: Record<TranslationKey, string> = {
   "settings.configSaved": "Configuration saved. Run validate to refresh capability probes.",
   "settings.subscriptionSaved": "Subscription selection saved",
   "settings.githubStartFailed": "GitHub connection could not be started.",
+
+  // github repos
+  "settings.recommendedRepos": "Recommended repositories",
+  "settings.recommendedReposDesc": "Based on your recent GitHub activity",
+  "settings.activityCount": "activities",
+  "settings.addRepoManually": "Add repository manually",
+  "settings.addRepoPlaceholder": "org/repo",
+  "settings.addRepo": "Add",
+  "settings.loadingRepos": "Loading recommended repositories...",
+  "settings.selectedRepos": "Selected repositories",
+  "settings.noReposSelected": "No repositories selected.",
 
   // language
   "lang.switch": "KO",

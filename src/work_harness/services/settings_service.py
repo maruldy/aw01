@@ -116,17 +116,60 @@ CONFIG_FIELD_DEFINITIONS: dict[ConnectorSource, list[ConnectorConfigField]] = {
             ),
         ),
         ConnectorConfigField(
-            key="github_repository",
-            label="Scoped repository",
-            placeholder="owner/repo",
-            help_text="The harness only watches the repositories you explicitly select.",
+            key="github_token",
+            label="GitHub PAT",
+            placeholder="ghp_... or gho_...",
+            help_text=(
+                "Personal access token with repo read scope. "
+                "Use this when browser OAuth is not configured."
+            ),
             required=True,
+            sensitive=True,
         ),
+        ConnectorConfigField(
+            key="github_repository",
+            label="Scoped repositories",
+            placeholder="owner/repo1,owner/repo2",
+            help_text="Comma-separated list of repositories the harness watches.",
+        ),
+    ],
+}
+
+AVAILABLE_REMOTE_ACTIONS: dict[str, list[dict[str, str]]] = {
+    "github": [
+        {
+            "key": "create_issue",
+            "label": "Create issue",
+            "description": "Create a new issue in a GitHub repository.",
+        },
+    ],
+    "jira": [
+        {
+            "key": "create_issue",
+            "label": "Create issue",
+            "description": "Create a new Jira issue in a configured project.",
+        },
+    ],
+    "slack": [
+        {
+            "key": "send_message",
+            "label": "Send message",
+            "description": "Send a message to a Slack channel.",
+        },
+    ],
+    "confluence": [
+        {
+            "key": "create_page",
+            "label": "Create page",
+            "description": "Create a new Confluence page in a configured space.",
+        },
     ],
 }
 
 
 class SettingsService:
+    _VALIDATE_CACHE_TTL = 30.0
+
     def __init__(
         self,
         base_settings: Settings,
@@ -138,16 +181,31 @@ class SettingsService:
         self._connectors = connectors
         self._store = store
         self._advisor = advisor
+        self._validate_cache: dict[str, tuple[float, dict]] = {}
 
     async def list_profiles(self) -> list[ConnectorProfile]:
-        profiles = []
-        for source in self._connectors:
-            profiles.append(await self.get_profile(source))
-        return profiles
+        import asyncio
 
-    async def get_profile(self, source: ConnectorSource) -> ConnectorProfile:
+        return list(await asyncio.gather(
+            *(self.get_profile(source) for source in self._connectors)
+        ))
+
+    async def get_profile(
+        self,
+        source: ConnectorSource,
+        *,
+        force_validate: bool = False,
+    ) -> ConnectorProfile:
         connector = await self.get_runtime_connector(source)
-        validation = await connector.validate()
+        import time
+
+        now = time.monotonic()
+        cached = self._validate_cache.get(source.value)
+        if not force_validate and cached and (now - cached[0]) < self._VALIDATE_CACHE_TTL:
+            validation = cached[1]
+        else:
+            validation = await connector.validate()
+            self._validate_cache[source.value] = (now, validation)
         capabilities = [
             ConnectorCapability.model_validate(item)
             for item in validation.get("capabilities", [])
@@ -267,11 +325,36 @@ class SettingsService:
             status="connected",
         )
 
+    async def get_allowed_actions(self, source: ConnectorSource) -> list[str]:
+        saved = await self._store.get_allowed_actions(source.value)
+        return saved if saved is not None else []
+
+    async def set_allowed_actions(
+        self,
+        source: ConnectorSource,
+        actions: list[str],
+    ) -> list[str]:
+        available_keys = {
+            a["key"] for a in AVAILABLE_REMOTE_ACTIONS.get(source.value, [])
+        }
+        filtered = [a for a in actions if a in available_keys]
+        await self._store.set_allowed_actions(source.value, filtered)
+        return filtered
+
     async def list_github_repositories(self) -> list[dict[str, object]]:
         runtime_settings = await self.get_runtime_settings_for_source(ConnectorSource.GITHUB)
         if not runtime_settings.github_token:
             raise ValueError("Connect GitHub before loading repositories.")
         return await self._fetch_github_repositories(
+            runtime_settings.github_token,
+            runtime_settings.github_base_url,
+        )
+
+    async def list_github_recommended_repos(self) -> list[dict[str, object]]:
+        runtime_settings = await self.get_runtime_settings_for_source(ConnectorSource.GITHUB)
+        if not runtime_settings.github_token:
+            raise ValueError("Connect GitHub before loading recommended repos.")
+        return await self._fetch_github_recommended_repos(
             runtime_settings.github_token,
             runtime_settings.github_base_url,
         )
@@ -390,6 +473,54 @@ class SettingsService:
                 }
             )
         return repositories
+
+    async def _fetch_github_recommended_repos(
+        self,
+        token: str,
+        base_url: str,
+    ) -> list[dict[str, object]]:
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        }
+        from collections import Counter
+
+        counter: Counter[str] = Counter()
+        async with httpx.AsyncClient(
+            base_url=base_url.rstrip("/"),
+            headers=headers,
+            timeout=10.0,
+        ) as client:
+            user_response = await client.get("/user")
+            if not user_response.is_success:
+                return []
+            login = user_response.json().get("login")
+            if not login:
+                return []
+
+            for page in range(1, 4):
+                events_response = await client.get(
+                    f"/users/{login}/events",
+                    params={"per_page": 100, "page": page},
+                )
+                if not events_response.is_success:
+                    break
+                events = events_response.json()
+                if not events:
+                    break
+                for event in events:
+                    if not isinstance(event, dict):
+                        continue
+                    repo = event.get("repo")
+                    if isinstance(repo, dict):
+                        name = str(repo.get("name") or "").strip()
+                        if name:
+                            counter[name] += 1
+
+        return [
+            {"full_name": name, "activity_count": count}
+            for name, count in counter.most_common(20)
+        ]
 
     def _github_callback_url(self) -> str:
         base_url = self._base_settings.webhook_base_url.rstrip("/")

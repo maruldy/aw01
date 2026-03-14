@@ -42,6 +42,15 @@ class SettingsStore:
                 )
                 """
             )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS connector_allowed_actions (
+                    source TEXT PRIMARY KEY,
+                    allowed_actions TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             await db.commit()
 
     async def get_selected_event_keys(self, source: str) -> list[str] | None:
@@ -58,6 +67,39 @@ class SettingsStore:
         if row is None:
             return None
         return json.loads(row[0])
+
+    async def get_allowed_actions(self, source: str) -> list[str] | None:
+        async with aiosqlite.connect(self._db_path) as db:
+            cursor = await db.execute(
+                """
+                SELECT allowed_actions
+                FROM connector_allowed_actions
+                WHERE source = ?
+                """,
+                (source,),
+            )
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return json.loads(row[0])
+
+    async def set_allowed_actions(self, source: str, actions: list[str]) -> None:
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO connector_allowed_actions (
+                    source,
+                    allowed_actions,
+                    updated_at
+                )
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(source) DO UPDATE SET
+                    allowed_actions = excluded.allowed_actions,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (source, json.dumps(actions)),
+            )
+            await db.commit()
 
     async def set_selected_event_keys(self, source: str, selected_event_keys: list[str]) -> None:
         async with aiosqlite.connect(self._db_path) as db:

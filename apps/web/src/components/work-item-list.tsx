@@ -5,9 +5,10 @@ interface WorkItemListProps {
   items: WorkItem[];
   selectedId?: string;
   onSelect: (item: WorkItem) => void;
+  onToggle: (item: WorkItem) => void;
 }
 
-export function WorkItemList({ items, selectedId, onSelect }: WorkItemListProps) {
+export function WorkItemList({ items, selectedId, onSelect, onToggle }: WorkItemListProps) {
   const { t } = useTranslation();
 
   return (
@@ -20,25 +21,29 @@ export function WorkItemList({ items, selectedId, onSelect }: WorkItemListProps)
         <span className="pill">{items.length} {t("workList.items")}</span>
       </div>
 
-      <div className="mt-5 space-y-3">
+      <div className="mt-5 space-y-2">
         {items.map((item) => (
           <button
             key={item.id}
             type="button"
-            onClick={() => onSelect(item)}
-            className={`w-full rounded-[22px] border p-4 text-left transition ${
+            onClick={() => (item.id === selectedId ? onToggle(item) : onSelect(item))}
+            className={`w-full rounded-[18px] border px-4 py-3 text-left transition ${
               item.id === selectedId
-                ? "border-signal bg-signal/10"
-                : "border-black/5 bg-white/70 hover:border-ink/20 hover:bg-white"
+                ? "border-ocean/30 bg-ocean/5"
+                : "border-black/5 bg-white/70 hover:border-ink/15 hover:bg-white"
             }`}
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-ink/45">{item.source}</p>
-                <p className="mt-2 font-display text-lg">{item.title}</p>
-                <p className="mt-2 line-clamp-2 text-sm text-ink/65">{item.proposal.summary}</p>
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-[0.18em] text-ink/45">{item.source}</span>
+                  <span className="pill text-[10px]">{item.status}</span>
+                </div>
+                <p className="mt-1 truncate font-display text-base">{item.title}</p>
               </div>
-              <span className="pill">{item.status}</span>
+              {item.id === selectedId ? (
+                <span className="h-2 w-2 shrink-0 rounded-full bg-ocean" />
+              ) : null}
             </div>
           </button>
         ))}

@@ -148,12 +148,12 @@ def _evaluate_github(event: ActivityEvent, settings: Settings) -> StoreabilityDe
     repository = _as_dict(event.metadata.get("repository"))
     pull_request = _as_dict(event.metadata.get("pull_request"))
     issue = _as_dict(event.metadata.get("issue"))
-    repo_name = _first_non_empty(repository.get("full_name"), settings.github_repository)
-    storeable = bool(
-        repo_name
-        and settings.github_repository
-        and repo_name == settings.github_repository
+    allowed_repos = _split_csv(settings.github_repository)
+    repo_name = _first_non_empty(
+        repository.get("full_name"),
+        next(iter(allowed_repos), None),
     )
+    storeable = bool(repo_name and repo_name in allowed_repos)
     canonical_url = _first_non_empty(
         pull_request.get("html_url"),
         issue.get("html_url"),

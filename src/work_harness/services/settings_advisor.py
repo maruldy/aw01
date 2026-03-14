@@ -18,6 +18,7 @@ def _verified_keys(capabilities: list[ConnectorCapability]) -> set[str]:
 class SettingsAdvisor:
     def __init__(self, provider: ChatModelProvider | None = None) -> None:
         self._provider = provider
+        self._cache: dict[str, dict[str, Any]] = {}
 
     async def recommend(
         self,
@@ -25,11 +26,22 @@ class SettingsAdvisor:
         capabilities: list[ConnectorCapability],
         subscriptions: list[EventSubscription],
     ) -> dict[str, Any]:
+        verified = _verified_keys(capabilities)
+        cache_key = f"{source.value}:{','.join(sorted(verified))}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         if self._provider is not None:
-            recommendation = await self._recommend_with_llm(source, capabilities, subscriptions)
+            recommendation = await self._recommend_with_llm(
+                source, capabilities, subscriptions,
+            )
             if recommendation is not None:
+                self._cache[cache_key] = recommendation
                 return recommendation
-        return self._fallback_recommendation(source, capabilities, subscriptions)
+        result = self._fallback_recommendation(
+            source, capabilities, subscriptions,
+        )
+        self._cache[cache_key] = result
+        return result
 
     async def _recommend_with_llm(
         self,

@@ -22,6 +22,7 @@ export interface WorkItem {
   status: WorkItemStatus;
   proposal: WorkProposal;
   decision_comment?: string | null;
+  action_result?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -98,4 +99,9 @@ export interface WebhookProviderMetadata {
 export interface GitHubRepository {
   full_name: string;
   private: boolean;
+}
+
+export interface GitHubRecommendedRepo {
+  full_name: string;
+  activity_count: number;
 }

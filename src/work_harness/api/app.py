@@ -91,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         connectors,
         audit_log,
         settings_service,
+        chat_provider=provider,
     )
     scheduler = SchedulerService()
 
@@ -240,7 +241,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             connector_source = ConnectorSource(source)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Unknown source") from exc
-        profile = await app.state.settings_service.get_profile(connector_source)
+        profile = await app.state.settings_service.get_profile(
+            connector_source, force_validate=True,
+        )
         return profile.model_dump(mode="json")
 
     @app.post("/settings/subscriptions/{source}")
@@ -274,6 +277,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             payload.values,
         )
         return profile.model_dump(mode="json")
+
+    @app.get("/settings/actions/{source}")
+    async def get_allowed_actions(source: str) -> dict[str, Any]:
+        await ensure_runtime(app)
+        try:
+            connector_source = ConnectorSource(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Unknown source") from exc
+        from work_harness.services.settings_service import AVAILABLE_REMOTE_ACTIONS
+        allowed = await app.state.settings_service.get_allowed_actions(
+            connector_source,
+        )
+        return {
+            "source": source,
+            "available": AVAILABLE_REMOTE_ACTIONS.get(source, []),
+            "allowed": allowed,
+        }
+
+    @app.post("/settings/actions/{source}")
+    async def update_allowed_actions(
+        source: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        await ensure_runtime(app)
+        try:
+            connector_source = ConnectorSource(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Unknown source") from exc
+        from work_harness.services.settings_service import AVAILABLE_REMOTE_ACTIONS
+        actions = payload.get("allowed", [])
+        saved = await app.state.settings_service.set_allowed_actions(
+            connector_source, actions,
+        )
+        return {
+            "source": source,
+            "available": AVAILABLE_REMOTE_ACTIONS.get(source, []),
+            "allowed": saved,
+        }
 
     @app.post("/settings/github/connect/start")
     async def start_github_connect(
@@ -309,6 +350,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return {"repositories": repositories}
+
+    @app.get("/settings/github/recommended-repos")
+    async def list_github_recommended_repos() -> dict[str, Any]:
+        await ensure_runtime(app)
+        try:
+            repos = await app.state.settings_service.list_github_recommended_repos()
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {"repositories": repos}
 
     async def _receive_webhook(
         provider: WebhookProvider,

@@ -1,26 +1,34 @@
 import { useEffect, useState } from "react";
 
 import {
-  getGitHubRepositories,
+  getAllowedActions,
+  getGitHubRecommendedRepos,
   getProfiles,
   getSchedulerJobs,
-  startGitHubConnection,
+  updateAllowedActions,
   updateConnectorConfig,
   updateSubscriptions,
   validateProfile
 } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
-import type { ConnectorProfile, GitHubRepository } from "../lib/types";
+import type { ConnectorProfile, GitHubRecommendedRepo } from "../lib/types";
+
+const TAB_ORDER = ["slack", "jira", "confluence", "github"] as const;
 
 export function SettingsPage() {
   const { t } = useTranslation();
   const [profiles, setProfiles] = useState<ConnectorProfile[]>([]);
+  const [activeTab, setActiveTab] = useState<string>(TAB_ORDER[0]);
   const [validation, setValidation] = useState<Record<string, string>>({});
   const [draftConfigValues, setDraftConfigValues] = useState<Record<string, Record<string, string>>>({});
+  const [editingSensitive, setEditingSensitive] = useState<Record<string, boolean>>({});
   const [draftSelections, setDraftSelections] = useState<Record<string, string[]>>({});
-  const [githubRepositories, setGitHubRepositories] = useState<GitHubRepository[]>([]);
-  const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
   const [jobs, setJobs] = useState<Array<Record<string, string>>>([]);
+  const [recommendedRepos, setRecommendedRepos] = useState<GitHubRecommendedRepo[]>([]);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [manualRepoInput, setManualRepoInput] = useState("");
+  const [availableActions, setAvailableActions] = useState<Array<{ key: string; label: string; description: string }>>([]);
+  const [allowedActions, setAllowedActions] = useState<string[]>([]);
 
   async function applyProfiles(nextProfiles: ConnectorProfile[]) {
     setProfiles(nextProfiles);
@@ -40,50 +48,77 @@ export function SettingsPage() {
       )
     );
 
-    const githubProfile = nextProfiles.find((profile) => profile.source === "github");
-    if (!githubProfile || githubProfile.missing_fields.includes("GITHUB_TOKEN")) {
-      setGitHubRepositories([]);
-      return;
-    }
-
-    try {
-      const repositoriesPayload = await getGitHubRepositories();
-      setGitHubRepositories(repositoriesPayload.repositories);
-    } catch {
-      setGitHubRepositories([]);
-    }
   }
 
   useEffect(() => {
     async function load() {
-      const params = new URLSearchParams(window.location.search);
-      const githubStatus = params.get("github");
-      const githubMessage = params.get("github_message");
-      if (githubStatus === "connected") {
-        setValidation((previous) => ({
-          ...previous,
-          github: githubMessage ?? t("settings.githubConnected")
-        }));
-      } else if (githubStatus === "error") {
-        setValidation((previous) => ({
-          ...previous,
-          github: githubMessage ?? t("settings.githubFailed")
-        }));
-      }
-      if (githubStatus) {
-        params.delete("github");
-        params.delete("github_message");
-        const nextSearch = params.toString();
-        const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
-        window.history.replaceState({}, "", nextUrl);
-      }
-
       const [profilePayload, jobsPayload] = await Promise.all([getProfiles(), getSchedulerJobs()]);
       await applyProfiles(profilePayload.profiles);
       setJobs(jobsPayload.jobs);
     }
     void load();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "github") return;
+    const githubProfile = profiles.find((p) => p.source === "github");
+    if (!githubProfile?.identity) return;
+    setLoadingRepos(true);
+    getGitHubRecommendedRepos()
+      .then((payload) => setRecommendedRepos(payload.repositories))
+      .catch(() => setRecommendedRepos([]))
+      .finally(() => setLoadingRepos(false));
+  }, [activeTab, profiles]);
+
+  useEffect(() => {
+    getAllowedActions(activeTab)
+      .then((data) => {
+        setAvailableActions(data.available);
+        setAllowedActions(data.allowed);
+      })
+      .catch(() => {
+        setAvailableActions([]);
+        setAllowedActions([]);
+      });
+  }, [activeTab]);
+
+  function toggleAction(key: string) {
+    const next = allowedActions.includes(key)
+      ? allowedActions.filter((a) => a !== key)
+      : [...allowedActions, key];
+    setAllowedActions(next);
+    void updateAllowedActions(activeTab, next);
+  }
+
+  function getSelectedRepos(): string[] {
+    const raw = draftConfigValues["github"]?.github_repository ?? "";
+    return raw.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+
+  function setSelectedRepos(repos: string[]) {
+    updateConfigValue("github", "github_repository", repos.join(","));
+  }
+
+  function toggleRepo(repoName: string) {
+    const current = getSelectedRepos();
+    const next = current.includes(repoName)
+      ? current.filter((r) => r !== repoName)
+      : [...current, repoName];
+    setSelectedRepos(next);
+    void updateConnectorConfig("github", { github_repository: next.join(",") });
+  }
+
+  function addManualRepo() {
+    const repo = manualRepoInput.trim();
+    if (!repo) return;
+    const current = getSelectedRepos();
+    if (!current.includes(repo)) {
+      const next = [...current, repo];
+      setSelectedRepos(next);
+      void updateConnectorConfig("github", { github_repository: next.join(",") });
+    }
+    setManualRepoInput("");
+  }
 
   async function handleValidate(source: string) {
     const result = await validateProfile(source);
@@ -124,9 +159,11 @@ export function SettingsPage() {
       } else {
         current.add(key);
       }
+      const next = [...current];
+      void updateSubscriptions(source, next);
       return {
         ...previous,
-        [source]: [...current]
+        [source]: next
       };
     });
   }
@@ -141,23 +178,7 @@ export function SettingsPage() {
     }));
   }
 
-  async function handleConnectGitHub() {
-    setIsConnectingGitHub(true);
-    try {
-      const payload = await startGitHubConnection(
-        window.location.origin,
-        window.location.pathname
-      );
-      window.location.assign(payload.authorization_url);
-    } catch (error) {
-      setValidation((previous) => ({
-        ...previous,
-        github:
-          error instanceof Error ? error.message : t("settings.githubStartFailed")
-      }));
-      setIsConnectingGitHub(false);
-    }
-  }
+  const activeProfile = profiles.find((p) => p.source === activeTab);
 
   return (
     <div className="space-y-6">
@@ -172,184 +193,174 @@ export function SettingsPage() {
       <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="panel">
           <p className="eyebrow">{t("settings.profilesEyebrow")}</p>
-          <div className="mt-5 space-y-3">
-            {profiles.map((profile) => (
-              <div key={profile.source} className="rounded-[22px] border border-black/5 bg-white/80 p-4">
+
+          {/* Tab bar */}
+          <div className="mt-4 flex gap-2">
+            {TAB_ORDER.map((source) => {
+              const profile = profiles.find((p) => p.source === source);
+              const isActive = activeTab === source;
+              return (
+                <button
+                  key={source}
+                  type="button"
+                  onClick={() => setActiveTab(source)}
+                  className={`flex items-center gap-2 rounded-[18px] px-4 py-2.5 text-sm font-semibold transition ${
+                    isActive
+                      ? "bg-ink text-canvas"
+                      : "bg-sand/40 text-ink/70 hover:bg-sand/70 hover:text-ink"
+                  }`}
+                >
+                  <span className="capitalize">{source}</span>
+                  {profile ? (
+                    <span className={`h-2 w-2 rounded-full ${profile.configured ? "bg-pine" : "bg-signal"}`} />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Active profile content */}
+          {activeProfile ? (
+            <div className="mt-5">
+              <div className="rounded-[22px] border border-black/5 bg-white/80 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="font-display text-xl">{profile.name}</p>
-                    <p className="mt-1 text-sm text-ink/60">{profile.source} · {profile.mode}</p>
-                    {profile.identity ? (
+                    <p className="font-display text-xl">{activeProfile.name}</p>
+                    <p className="mt-1 text-sm text-ink/60">{activeProfile.source} · {activeProfile.mode}</p>
+                    {activeProfile.identity ? (
                       <p className="mt-1 text-xs uppercase tracking-[0.18em] text-pine">
-                        {t("settings.identity")}: {profile.identity}
+                        {t("settings.identity")}: {activeProfile.identity}
                       </p>
                     ) : null}
                   </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleValidate(profile.source)}
-                      className="rounded-[16px] bg-ocean px-4 py-2 text-sm font-semibold text-white"
-                    >
-                      {t("settings.validate")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSaveSubscriptions(profile.source)}
-                      className="rounded-[16px] bg-ink px-4 py-2 text-sm font-semibold text-white"
-                    >
-                      {t("settings.saveAlerts")}
-                    </button>
-                  </div>
                 </div>
-                <div className="mt-3 rounded-[18px] bg-canvas px-4 py-3">
-                  <p className="text-sm text-ink/75">
-                    {validation[profile.source] ?? profile.message}
-                  </p>
-                  {!profile.configured ? (
-                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-signal">
-                      {t("settings.missing")}: {profile.missing_fields.join(", ")}
+                {!activeProfile.configured ? (
+                  <div className="mt-3 rounded-[18px] bg-signal/10 px-4 py-3">
+                    <p className="text-sm text-ink/75">
+                      {validation[activeProfile.source] ?? activeProfile.message}
                     </p>
-                  ) : (
-                    <p className="mt-2 text-xs uppercase tracking-[0.18em] text-pine">{t("settings.ready")}</p>
-                  )}
-                </div>
+                    {activeProfile.missing_fields.length > 0 ? (
+                      <p className="mt-2 text-xs uppercase tracking-[0.18em] text-signal">
+                        {t("settings.missing")}: {activeProfile.missing_fields.join(", ")}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-                  <div className="rounded-[18px] border border-black/5 bg-white/90 p-4 lg:col-span-2">
-                    {profile.source === "github" ? (
-                      <>
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="eyebrow">{t("settings.browserConnection")}</p>
-                            <p className="mt-2 text-sm text-ink/70">
-                              {t("settings.browserConnectionDesc")}
-                            </p>
-                          </div>
+                  {activeProfile.source === "github" ? (
+                    <div className="rounded-[18px] border border-black/5 bg-white/90 p-4 lg:col-span-2">
+                      <p className="eyebrow">{t("settings.recommendedRepos")}</p>
+
+                      {loadingRepos ? (
+                        <p className="mt-4 text-sm text-ink/50">{t("settings.loadingRepos")}</p>
+                      ) : recommendedRepos.length > 0 ? (
+                        <div className="mt-4 grid gap-2 md:grid-cols-2">
+                          {recommendedRepos.map((repo) => {
+                            const checked = getSelectedRepos().includes(repo.full_name);
+                            return (
+                              <label
+                                key={repo.full_name}
+                                className={`flex items-center gap-3 rounded-[14px] border px-3 py-2.5 transition ${
+                                  checked ? "border-ocean/30 bg-ocean/5" : "border-black/5 bg-canvas"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleRepo(repo.full_name)}
+                                  className="h-4 w-4 accent-signal"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="truncate text-sm font-medium text-ink">{repo.full_name}</p>
+                                </div>
+                                <span className="shrink-0 text-xs text-ink/50">
+                                  {repo.activity_count} {t("settings.activityCount")}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4">
+                        <p className="text-sm font-semibold text-ink">{t("settings.addRepoManually")}</p>
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            type="text"
+                            value={manualRepoInput}
+                            onChange={(e) => setManualRepoInput(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addManualRepo(); } }}
+                            placeholder={t("settings.addRepoPlaceholder")}
+                            className="flex-1 rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal"
+                          />
                           <button
                             type="button"
-                            onClick={handleConnectGitHub}
-                            disabled={isConnectingGitHub}
-                            className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-signal/60"
+                            onClick={addManualRepo}
+                            className="rounded-[14px] bg-ocean px-4 py-2 text-sm font-semibold text-white"
                           >
-                            {isConnectingGitHub ? t("settings.redirecting") : profile.identity ? t("settings.reconnectGitHub") : t("settings.connectGitHub")}
+                            {t("settings.addRepo")}
                           </button>
                         </div>
+                      </div>
 
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
-                          <div className="rounded-[18px] bg-canvas px-4 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="text-sm font-semibold text-ink">{t("settings.connectedAccount")}</span>
-                              {profile.identity ? <span className="pill">{t("settings.connected")}</span> : null}
-                            </div>
-                            <p className="mt-3 text-sm text-ink/70">
-                              {profile.identity ?? t("settings.noGitHubAccount")}
-                            </p>
+                      {getSelectedRepos().length > 0 ? (
+                        <div className="mt-4">
+                          <p className="text-sm font-semibold text-ink">{t("settings.selectedRepos")}</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {getSelectedRepos().map((repo) => (
+                              <span
+                                key={repo}
+                                className="inline-flex items-center gap-1.5 rounded-full bg-ink/10 px-3 py-1 text-sm text-ink"
+                              >
+                                {repo}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRepo(repo)}
+                                  className="text-ink/40 hover:text-ink"
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
                           </div>
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-sm text-ink/50">{t("settings.noReposSelected")}</p>
+                      )}
+                    </div>
+                  ) : null}
 
-                          <label className="rounded-[18px] bg-canvas px-4 py-3">
-                            <span className="text-sm font-semibold text-ink">{t("settings.scopedRepo")}</span>
-                            <select
-                              value={draftConfigValues[profile.source]?.github_repository ?? ""}
-                              onChange={(event) => updateConfigValue(profile.source, "github_repository", event.target.value)}
-                              disabled={githubRepositories.length === 0}
-                              className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal disabled:bg-black/5"
-                            >
-                              <option value="">{t("settings.selectRepo")}</option>
-                              {githubRepositories.map((repository) => (
-                                <option key={repository.full_name} value={repository.full_name}>
-                                  {repository.full_name}{repository.private ? ` ${t("settings.private")}` : ""}
-                                </option>
-                              ))}
-                            </select>
-                            <p className="mt-2 text-xs text-ink/55">
-                              {githubRepositories.length > 0
-                                ? t("settings.chooseRepo")
-                                : t("settings.connectFirst")}
-                            </p>
-                          </label>
-                        </div>
-
-                        <div className="mt-4 flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => handleSaveConfig(profile.source)}
-                            disabled={!draftConfigValues[profile.source]?.github_repository}
-                            className="rounded-[16px] bg-ink px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-ink/60"
-                          >
-                            {t("settings.saveRepo")}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="eyebrow">{t("settings.connectionInputs")}</p>
-                            <p className="mt-2 text-sm text-ink/70">
-                              {t("settings.connectionInputsDesc")}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleSaveConfig(profile.source)}
-                            className="rounded-[16px] bg-signal px-4 py-2 text-sm font-semibold text-white"
-                          >
-                            {t("settings.saveConfig")}
-                          </button>
-                        </div>
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
-                          {profile.config_fields.map((field) => (
-                            <label key={field.key} className="rounded-[18px] bg-canvas px-4 py-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="text-sm font-semibold text-ink">{field.label}</span>
-                                {field.sensitive && field.is_set ? <span className="pill">{t("settings.stored")}</span> : null}
-                              </div>
-                              <input
-                                type={field.sensitive ? "password" : "text"}
-                                value={draftConfigValues[profile.source]?.[field.key] ?? ""}
-                                onChange={(event) => updateConfigValue(profile.source, field.key, event.target.value)}
-                                placeholder={field.sensitive && field.is_set ? t("settings.keepCurrent") : field.placeholder}
-                                className="mt-3 w-full rounded-[14px] border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-signal"
-                              />
-                              <p className="mt-2 text-xs text-ink/55">{field.help_text}</p>
-                            </label>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {profile.webhook ? (
+                  {activeProfile.webhook ? (
                     <div className="rounded-[18px] border border-black/5 bg-white/90 p-4 lg:col-span-2">
                       <p className="eyebrow">{t("settings.webhookIntake")}</p>
                       <div className="mt-3 rounded-[16px] bg-canvas px-4 py-3">
                         <p className="text-sm font-semibold text-ink">{t("settings.callbackUrl")}</p>
                         <p className="mt-2 break-all text-sm text-ink/70">
-                          {profile.webhook.callback_url}
+                          {activeProfile.webhook.callback_url}
                         </p>
                       </div>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         <div className="rounded-[16px] bg-canvas px-4 py-3">
                           <p className="text-sm font-semibold text-ink">{t("settings.verification")}</p>
                           <p className="mt-2 text-sm text-ink/70">
-                            {profile.webhook.verification_mode}
+                            {activeProfile.webhook.verification_mode}
                           </p>
-                          {profile.webhook.secret_env_key ? (
+                          {activeProfile.webhook.secret_env_key ? (
                             <p className="mt-2 text-xs uppercase tracking-[0.18em] text-pine">
-                              {t("settings.secretEnv")}: {profile.webhook.secret_env_key}
+                              {t("settings.secretEnv")}: {activeProfile.webhook.secret_env_key}
                             </p>
                           ) : null}
                         </div>
                         <div className="rounded-[16px] bg-canvas px-4 py-3">
                           <p className="text-sm font-semibold text-ink">{t("settings.recommendedEvents")}</p>
                           <p className="mt-2 text-sm text-ink/70">
-                            {profile.webhook.recommended_events.join(", ")}
+                            {activeProfile.webhook.recommended_events.join(", ")}
                           </p>
                         </div>
                       </div>
                       <div className="mt-3 space-y-2">
-                        {profile.webhook.setup_notes.map((note) => (
+                        {activeProfile.webhook.setup_notes.map((note) => (
                           <div key={note} className="rounded-[16px] bg-canvas px-4 py-3 text-sm text-ink/70">
                             {note}
                           </div>
@@ -359,9 +370,41 @@ export function SettingsPage() {
                   ) : null}
 
                   <div className="rounded-[18px] border border-black/5 bg-white/90 p-4">
+                    <p className="eyebrow">{t("settings.allowedActions")}</p>
+                    {availableActions.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        {availableActions.map((action) => {
+                          const checked = allowedActions.includes(action.key);
+                          return (
+                            <label
+                              key={action.key}
+                              className={`flex items-center gap-3 rounded-[14px] border px-4 py-3 transition ${
+                                checked ? "border-ocean/30 bg-ocean/5" : "border-black/5 bg-canvas"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleAction(action.key)}
+                                className="h-4 w-4 accent-signal"
+                              />
+                              <div>
+                                <p className="text-sm font-semibold text-ink">{action.label}</p>
+                                <p className="mt-0.5 text-xs text-ink/55">{action.description}</p>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-ink/50">{t("settings.noActionsAvailable")}</p>
+                    )}
+                  </div>
+
+                  <div className="rounded-[18px] border border-black/5 bg-white/90 p-4">
                     <p className="eyebrow">{t("settings.capabilityProbe")}</p>
                     <div className="mt-3 space-y-3">
-                      {profile.capabilities.map((capability) => (
+                      {activeProfile.capabilities.map((capability) => (
                         <div key={capability.key} className="rounded-[16px] bg-canvas px-3 py-3">
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-sm font-semibold text-ink">{capability.label}</p>
@@ -375,10 +418,10 @@ export function SettingsPage() {
 
                   <div className="rounded-[18px] border border-black/5 bg-white/90 p-4">
                     <p className="eyebrow">{t("settings.alertSubscriptions")}</p>
-                    <p className="mt-3 text-sm leading-7 text-ink/70">{profile.advisory}</p>
+                    <p className="mt-3 text-sm leading-7 text-ink/70">{activeProfile.advisory}</p>
                     <div className="mt-4 space-y-3">
-                      {profile.subscriptions.map((subscription) => {
-                        const selected = (draftSelections[profile.source] ?? []).includes(subscription.key);
+                      {activeProfile.subscriptions.map((subscription) => {
+                        const selected = (draftSelections[activeProfile.source] ?? []).includes(subscription.key);
                         return (
                           <label
                             key={subscription.key}
@@ -393,7 +436,7 @@ export function SettingsPage() {
                                 type="checkbox"
                                 checked={selected}
                                 disabled={!subscription.available}
-                                onChange={() => toggleSubscription(profile.source, subscription.key)}
+                                onChange={() => toggleSubscription(activeProfile.source, subscription.key)}
                                 className="mt-1 h-4 w-4 accent-signal"
                               />
                               <div className="flex-1">
@@ -412,8 +455,8 @@ export function SettingsPage() {
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="panel">

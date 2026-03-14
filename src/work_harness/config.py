@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_api_base: str | None = None
     openai_model: str = "MiniMax-M2.5"
+    openai_temperature: float = 1.0
 
     jira_base_url: str | None = None
     jira_api_token: str | None = None
@@ -30,7 +31,7 @@ class Settings(BaseSettings):
     slack_allowed_channels: str = ""
     slack_signing_secret: str | None = None
 
-    github_base_url: str = "https://oss.navercorp.com"
+    github_base_url: str = "https://oss.navercorp.com/api/v3"
     github_client_id: str | None = None
     github_client_secret: str | None = None
     github_token: str | None = None

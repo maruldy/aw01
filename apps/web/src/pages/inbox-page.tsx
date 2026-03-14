@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createIngress, decideWorkItem, getProfiles, listWorkItems } from "../lib/api";
+import { createIngress, decideWorkItem, listWorkItems } from "../lib/api";
 import { useTranslation } from "../lib/i18n";
-import type { ConnectorProfile, WorkItem } from "../lib/types";
+import type { WorkItem } from "../lib/types";
 import { WorkItemDetail } from "../components/work-item-detail";
 import { WorkItemList } from "../components/work-item-list";
 
@@ -23,34 +22,43 @@ const presets = {
     actor: "jira-bot"
   },
   github: {
-    event_type: "github.review_requested",
+    event_type: "github.pull_request.opened",
     title: "Review requested for infra patch",
     body: "Prepare a safe draft PR and summarize potential risk before opening it.",
     external_id: "gh-review-8",
-    actor: "octocat"
+    actor: "daeyoung-lee",
+    metadata: {
+      repository: { full_name: "daeyoung-lee/PrivateTasks" },
+      sender: { login: "daeyoung-lee" }
+    }
   }
 };
 
 export function InboxPage() {
   const { t } = useTranslation();
   const [items, setItems] = useState<WorkItem[]>([]);
-  const [profiles, setProfiles] = useState<ConnectorProfile[]>([]);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [source, setSource] = useState<"slack" | "jira" | "github">("slack");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedItem = useMemo(
-    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
+    () => (selectedId ? items.find((item) => item.id === selectedId) ?? null : null),
     [items, selectedId]
   );
 
-  async function refresh() {
-    const [nextItems, nextProfiles] = await Promise.all([listWorkItems(), getProfiles()]);
-    setItems(nextItems);
-    setProfiles(nextProfiles.profiles);
-    if (!selectedId && nextItems[0]) {
-      setSelectedId(nextItems[0].id);
+  const closeDetail = useCallback(() => setSelectedId(null), []);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeDetail();
     }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closeDetail]);
+
+  async function refresh() {
+    const nextItems = await listWorkItems();
+    setItems(nextItems);
   }
 
   useEffect(() => {
@@ -69,31 +77,24 @@ export function InboxPage() {
   }
 
   async function handleDecision(decision: "accept" | "reject" | "advise" | "defer", comment?: string) {
-    if (!selectedItem) {
-      return;
-    }
+    if (!selectedItem) return;
     await decideWorkItem(selectedItem.id, decision, comment);
     await refresh();
   }
 
-  const disconnectedProfiles = profiles.filter((profile) => !profile.configured);
-
   return (
     <div className="space-y-6">
       <section className="panel">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="eyebrow">{t("inbox.eyebrow")}</p>
-            <h1 className="font-display text-4xl leading-tight lg:text-5xl">
-              {t("inbox.heroTitle")}
-              <span className="block text-signal">{t("inbox.heroAccent")}</span>
-            </h1>
+            <h1 className="font-display text-2xl">{t("inbox.title")}</h1>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <select
               value={source}
               onChange={(event) => setSource(event.target.value as "slack" | "jira" | "github")}
-              className="rounded-[18px] border border-black/10 bg-white px-4 py-3 text-sm"
+              className="rounded-[18px] border border-black/10 bg-white px-4 py-2.5 text-sm"
             >
               <option value="slack">{t("inbox.slackMention")}</option>
               <option value="jira">{t("inbox.jiraUpdate")}</option>
@@ -103,35 +104,24 @@ export function InboxPage() {
               type="button"
               onClick={simulateEvent}
               disabled={isSubmitting}
-              className="rounded-[18px] bg-signal px-5 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px] disabled:opacity-60"
+              className="rounded-[18px] bg-signal px-5 py-2.5 text-sm font-semibold text-white transition hover:translate-y-[-1px] disabled:opacity-60"
             >
               {isSubmitting ? t("inbox.injecting") : t("inbox.simulate")}
             </button>
           </div>
         </div>
-
-        {disconnectedProfiles.length > 0 ? (
-          <div className="mt-6 rounded-[24px] border border-signal/20 bg-signal/10 p-5">
-            <p className="eyebrow text-signal">{t("inbox.connectorRequired")}</p>
-            <p className="mt-3 font-display text-2xl">
-              {t("inbox.noEvents")}
-            </p>
-            <p className="mt-3 text-sm leading-7 text-ink/75">
-              {disconnectedProfiles.map((profile) => profile.source).join(", ")} {t("inbox.disconnectedMsg")}
-            </p>
-            <Link
-              to="/settings"
-              className="mt-4 inline-flex rounded-[18px] bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:translate-y-[-1px]"
-            >
-              {t("inbox.openWizard")}
-            </Link>
-          </div>
-        ) : null}
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-        <WorkItemList items={items} selectedId={selectedItem?.id} onSelect={(item) => setSelectedId(item.id)} />
-        <WorkItemDetail item={selectedItem} onDecision={handleDecision} />
+      <section className={`grid gap-6 ${selectedItem ? "xl:grid-cols-[1fr_1.2fr]" : ""}`}>
+        <WorkItemList items={items} selectedId={selectedItem?.id} onSelect={(item) => setSelectedId(item.id)} onToggle={closeDetail} />
+        {selectedItem ? (
+          <WorkItemDetail
+            key={selectedItem.id}
+            item={selectedItem}
+            onDecision={handleDecision}
+            onClose={closeDetail}
+          />
+        ) : null}
       </section>
     </div>
   );

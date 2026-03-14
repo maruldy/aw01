@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
-import { Activity, BookOpen, Globe, Radio, Settings2, Sparkles } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, Globe, Radio, Settings2, Sparkles } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { getProfiles } from "../lib/api";
 import { useTranslation, type Locale } from "../lib/i18n";
 import type { TranslationKey } from "../locales/ko";
 
@@ -14,6 +16,18 @@ const navItems: { to: string; labelKey: TranslationKey; icon: typeof Sparkles }[
 
 export function NavShell({ children }: { children: ReactNode }) {
   const { t, locale, setLocale } = useTranslation();
+  const [disconnected, setDisconnected] = useState<string[]>([]);
+
+  useEffect(() => {
+    getProfiles()
+      .then((data) => {
+        const names = data.profiles
+          .filter((p) => !p.configured)
+          .map((p) => p.source);
+        setDisconnected(names);
+      })
+      .catch(() => {});
+  }, []);
 
   function toggleLocale() {
     setLocale(locale === "ko" ? "en" : "ko" as Locale);
@@ -60,6 +74,19 @@ export function NavShell({ children }: { children: ReactNode }) {
               </NavLink>
             ))}
           </nav>
+
+          {disconnected.length > 0 ? (
+            <Link
+              to="/settings"
+              className="mt-4 flex items-start gap-2.5 rounded-[18px] border border-signal/20 bg-signal/5 px-4 py-3 transition hover:bg-signal/10"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-signal" />
+              <p className="text-xs leading-5 text-ink/70">
+                <span className="font-semibold text-signal">{disconnected.join(", ")}</span>
+                {" "}{t("nav.disconnectedHint")}
+              </p>
+            </Link>
+          ) : null}
 
           <div className="mt-auto rounded-[24px] bg-ink p-5 text-canvas">
             <p className="font-display text-lg">{t("nav.pushFirst")}</p>

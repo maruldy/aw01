@@ -93,7 +93,9 @@ class WorkItem(BaseModel):
     actor: str | None = None
     status: WorkItemStatus = WorkItemStatus.PENDING
     proposal: WorkProposal
+    metadata: dict[str, Any] = Field(default_factory=dict)
     decision_comment: str | None = None
+    action_result: dict[str, Any] | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

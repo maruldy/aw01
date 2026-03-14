@@ -109,7 +109,7 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
                             evidence.append(f"{header_name}: {header_value}")
 
                     if not repository_missing:
-                        repository = self._settings.github_repository
+                        repository = self._settings.github_repository.split(",")[0].strip()
                         repo_response = await client.get(f"/repos/{repository}")
                         if repo_response.is_success:
                             capabilities[1].status = CapabilityStatus.VERIFIED
@@ -220,16 +220,22 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
             return context
 
         payload = event.metadata if isinstance(event.metadata, dict) else {}
+        event_repo = payload.get("repository", {})
+        repo_full_name = (
+            event_repo.get("full_name")
+            if isinstance(event_repo, dict)
+            else None
+        ) or self._settings.github_repository.split(",")[0].strip()
         pull_request = payload.get("pull_request", {})
         issue = payload.get("issue", {})
         number = None
         endpoint = None
         if isinstance(pull_request, dict) and pull_request.get("number"):
             number = pull_request["number"]
-            endpoint = f"/repos/{self._settings.github_repository}/pulls/{number}"
+            endpoint = f"/repos/{repo_full_name}/pulls/{number}"
         elif isinstance(issue, dict) and issue.get("number"):
             number = issue["number"]
-            endpoint = f"/repos/{self._settings.github_repository}/issues/{number}"
+            endpoint = f"/repos/{repo_full_name}/issues/{number}"
         if endpoint is None:
             return context
 
@@ -261,12 +267,79 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
         action: str,
         payload: dict[str, object],
     ) -> dict[str, object]:
+        if action == "create_issue":
+            return await self._create_issue(payload)
         return {
             "ok": False,
             "source": self.source.value,
             "action": action,
             "message": "Not implemented.",
         }
+
+    async def _create_issue(
+        self,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        repo = str(
+            payload.get("repository")
+            or self._settings.github_repository.split(",")[0].strip()
+        )
+        if not self._settings.github_token or not repo:
+            return {
+                "ok": False,
+                "source": self.source.value,
+                "action": "create_issue",
+                "message": "GitHub token or repository not configured.",
+            }
+        headers = {
+            "Authorization": f"Bearer {self._settings.github_token}",
+            "Accept": "application/vnd.github+json",
+        }
+        body = {
+            "title": str(payload.get("title", "New issue")),
+            "body": str(payload.get("body", "")),
+        }
+        try:
+            async with httpx.AsyncClient(
+                base_url=self._settings.github_base_url.rstrip("/"),
+                headers=headers,
+                timeout=10.0,
+            ) as client:
+                response = await client.post(
+                    f"/repos/{repo}/issues",
+                    json=body,
+                )
+            if response.is_success:
+                data = response.json()
+                logger.info(
+                    "GitHub issue created: repo=%s number=%s",
+                    repo, data.get("number"),
+                )
+                return {
+                    "ok": True,
+                    "source": self.source.value,
+                    "action": "create_issue",
+                    "issue_number": data.get("number"),
+                    "html_url": data.get("html_url"),
+                }
+            logger.error(
+                "GitHub create_issue failed: repo=%s status=%d",
+                repo, response.status_code,
+            )
+            return {
+                "ok": False,
+                "source": self.source.value,
+                "action": "create_issue",
+                "message": f"GitHub API returned {response.status_code}",
+            }
+        except httpx.HTTPError as exc:
+            logger.error("GitHub create_issue error: %s", exc)
+            return {
+                "ok": False,
+                "source": self.source.value,
+                "action": "create_issue",
+                "message": str(exc),
+            }
 
     def available_subscriptions(self) -> list[EventSubscription]:
         return [
