@@ -1,5 +1,5 @@
 # --- Stage 1: Build frontend ---
-FROM --platform=linux/amd64 reg.navercorp.com/base/ubuntu/python:3.12 AS frontend
+FROM --platform=linux/amd64 reg.navercorp.com/base/ubuntu/python:3.13.3 AS frontend
 
 ENV HTTP_PROXY="http://10.113.234.119:3128"
 ENV HTTPS_PROXY="http://10.113.234.119:3128"
@@ -15,7 +15,7 @@ COPY apps/web/ ./
 RUN npm run build
 
 # --- Stage 2: Build backend ---
-FROM --platform=linux/amd64 reg.navercorp.com/base/ubuntu/python:3.12 AS runtime
+FROM --platform=linux/amd64 reg.navercorp.com/base/ubuntu/python:3.13.3 AS runtime
 
 ENV HTTP_PROXY="http://10.113.234.119:3128"
 ENV HTTPS_PROXY="http://10.113.234.119:3128"
