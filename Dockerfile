@@ -1,5 +1,12 @@
 # --- Stage 1: Build frontend ---
-FROM reg.navercorp.com/base/node:20-slim AS frontend
+FROM --platform=linux/amd64 reg.navercorp.com/base/ubuntu/python:3.12 AS frontend
+
+ENV HTTP_PROXY="http://10.113.234.119:3128"
+ENV HTTPS_PROXY="http://10.113.234.119:3128"
+ENV NO_PROXY="localhost,127.0.0.1"
+
+USER root
+RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/apps/web
 COPY apps/web/package.json apps/web/package-lock.json ./
@@ -8,7 +15,13 @@ COPY apps/web/ ./
 RUN npm run build
 
 # --- Stage 2: Build backend ---
-FROM reg.navercorp.com/base/python:3.12-slim AS runtime
+FROM --platform=linux/amd64 reg.navercorp.com/base/ubuntu/python:3.12 AS runtime
+
+ENV HTTP_PROXY="http://10.113.234.119:3128"
+ENV HTTPS_PROXY="http://10.113.234.119:3128"
+ENV NO_PROXY="localhost,127.0.0.1"
+
+USER root
 
 WORKDIR /app
 
