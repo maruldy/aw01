@@ -1,5 +1,5 @@
 # --- Stage 1: Build frontend ---
-FROM node:20-slim AS frontend
+FROM reg.navercorp.com/base/node:20-slim AS frontend
 
 WORKDIR /app/apps/web
 COPY apps/web/package.json apps/web/package-lock.json ./
@@ -8,7 +8,7 @@ COPY apps/web/ ./
 RUN npm run build
 
 # --- Stage 2: Build backend ---
-FROM python:3.12-slim AS runtime
+FROM reg.navercorp.com/base/python:3.12-slim AS runtime
 
 WORKDIR /app
 
