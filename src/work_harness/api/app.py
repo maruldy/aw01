@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -493,5 +494,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             limit=max(1, min(limit, 100)),
         )
         return {"items": [item.model_dump(mode="json") for item in items]}
+
+    # Serve frontend static files in production
+    import pathlib
+
+    static_dir = pathlib.Path(
+        os.environ.get("STATIC_DIR", "/app/static")
+    )
+    if static_dir.is_dir():
+        from fastapi.staticfiles import StaticFiles
+        from starlette.responses import FileResponse
+
+        index_html = static_dir / "index.html"
+
+        app.mount(
+            "/assets",
+            StaticFiles(directory=str(static_dir / "assets")),
+            name="static-assets",
+        )
+
+        @app.get("/")
+        async def serve_index():
+            return FileResponse(index_html)
+
+        @app.get("/{full_path:path}")
+        async def spa_fallback(full_path: str):
+            file_path = static_dir / full_path
+            if file_path.is_file():
+                return FileResponse(file_path)
+            return FileResponse(index_html)
 
     return app
