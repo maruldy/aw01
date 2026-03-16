@@ -18,6 +18,9 @@ COPY src ./src
 RUN pip install --no-cache-dir uv \
     && uv pip install --system --no-cache .
 
+RUN mkdir -p /app/data/logs /app/data/chroma /app/.workspaces \
+    && chmod -R 777 /app/data /app/.workspaces
+
 # Copy frontend build output
 COPY --from=frontend /app/apps/web/dist ./static
 
