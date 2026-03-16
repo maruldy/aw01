@@ -383,7 +383,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> tuple[dict[str, Any], int]:
         logger.info("Webhook received: provider=%s", provider.value)
         raw_body = await request.body()
-        payload = await request.json()
+        try:
+            payload = await request.json() if raw_body else {}
+        except Exception:
+            logger.warning("Webhook body not JSON: provider=%s", provider.value)
+            payload = {}
         verification, envelope = await app.state.webhooks.receive(
             provider,
             raw_body,
