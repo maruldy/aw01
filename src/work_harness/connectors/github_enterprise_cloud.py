@@ -182,6 +182,20 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
         return []
 
     async def handle_webhook(self, payload: dict[str, object]) -> ActivityEvent:
+        if payload.get("zen") is not None or not payload:
+            repo = payload.get("repository", {})
+            repo_name = repo.get("full_name") if isinstance(repo, dict) else None
+            sender = payload.get("sender", {}) if isinstance(payload.get("sender"), dict) else {}
+            return ActivityEvent(
+                source=self.source,
+                event_type="github.ping",
+                title=f"Webhook ping: {repo_name or 'unknown'}",
+                body=str(payload.get("zen", "Webhook connected.")),
+                external_id=str(payload.get("hook_id", "ping")),
+                actor=str(sender.get("login")) if sender.get("login") else None,
+                metadata=payload,
+            )
+
         action = str(payload.get("action", "activity"))
         if payload.get("pull_request") is not None:
             event_family = "pull_request"
