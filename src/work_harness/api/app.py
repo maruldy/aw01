@@ -85,6 +85,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         connectors=connectors,
         knowledge_service=knowledge_service,
     )
+    from work_harness.repositories.sqlite import (
+        SqliteRunRepository,
+        SqliteWorkItemRepository,
+    )
+
+    work_item_repo = SqliteWorkItemRepository(app_settings.knowledge_db_path)
+    run_repo = SqliteRunRepository(app_settings.knowledge_db_path)
     audit_log = AuditLog()
     webhooks = WebhookReceiverService(app_settings, webhook_store)
     harness = HarnessService(
@@ -93,6 +100,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         audit_log,
         settings_service,
         chat_provider=provider,
+        work_items=work_item_repo,
+        runs=run_repo,
     )
     scheduler = SchedulerService()
 
@@ -103,6 +112,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await knowledge_store.initialize()
         await settings_store.initialize()
         await webhook_store.initialize()
+        await harness.initialize()
         scheduler.start()
         app.state.runtime_ready = True
         logger.info("Runtime initialization complete")
@@ -404,6 +414,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "knowledge_reason": sync_result.reason,
                 "knowledge_record_key": sync_result.record_key,
             }
+            try:
+                ingress_result = await app.state.harness.ingest_event(
+                    connector_source, payload,
+                )
+                knowledge_payload["work_item_id"] = (
+                    ingress_result.work_item.id
+                    if ingress_result.work_item
+                    else None
+                )
+                knowledge_payload["processed"] = ingress_result.processed
+            except Exception:
+                logger.exception(
+                    "Webhook work item creation failed: %s",
+                    provider.value,
+                )
         response_payload = {
             "accepted": verification.accepted,
             "verified": verification.verified,

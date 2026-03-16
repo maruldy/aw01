@@ -19,7 +19,7 @@ from work_harness.domain.models import (
     WorkItemStatus,
 )
 from work_harness.graph.supervisor import SupervisorService
-from work_harness.repositories.memory import InMemoryRunRepository, InMemoryWorkItemRepository
+from work_harness.repositories.sqlite import SqliteRunRepository, SqliteWorkItemRepository
 from work_harness.services.audit_log import AuditLog
 from work_harness.services.settings_service import SettingsService
 
@@ -54,15 +54,23 @@ class HarnessService:
         audit_log: AuditLog,
         settings_service: SettingsService,
         chat_provider: object | None = None,
+        work_items: SqliteWorkItemRepository | None = None,
+        runs: SqliteRunRepository | None = None,
     ) -> None:
         self._supervisor = supervisor
         self._connectors = connectors
         self._audit_log = audit_log
         self._settings_service = settings_service
         self._chat_provider = chat_provider
-        self._work_items = InMemoryWorkItemRepository()
-        self._runs = InMemoryRunRepository()
+        self._work_items = work_items
+        self._runs = runs
         self._bus = RunEventBus()
+
+    async def initialize(self) -> None:
+        if self._work_items:
+            await self._work_items.initialize()
+        if self._runs:
+            await self._runs.initialize()
 
     async def ingest_event(self, source: ConnectorSource, payload: dict[str, Any]) -> IngressResult:
         logger.info("Ingesting event: source=%s", source.value)
