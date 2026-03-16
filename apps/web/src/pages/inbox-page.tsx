@@ -63,6 +63,8 @@ export function InboxPage() {
 
   useEffect(() => {
     void refresh();
+    const interval = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(interval);
   }, []);
 
   async function simulateEvent() {

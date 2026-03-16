@@ -197,38 +197,51 @@ class GitHubEnterpriseCloudAdapter(ConnectorAdapter):
             )
 
         action = str(payload.get("action", "activity"))
+        raw_repo = payload.get("repository")
+        repository = raw_repo if isinstance(raw_repo, dict) else {}
+        repo_name = str(repository.get("full_name", ""))
+
         if payload.get("pull_request") is not None:
             event_family = "pull_request"
-            title_source = payload.get("pull_request", {})
+            resource = payload.get("pull_request", {})
         elif payload.get("issue") is not None:
             event_family = "issue"
-            title_source = payload.get("issue", {})
+            resource = payload.get("issue", {})
         else:
             event_family = str(payload.get("event_name", "event"))
-            title_source = payload.get("repository", {})
+            resource = repository
 
-        title = title_source.get("title") if isinstance(title_source, dict) else None
-        if not title:
-            repository = (
-                payload.get("repository", {})
-                if isinstance(payload.get("repository"), dict)
-                else {}
-            )
-            title = repository.get("full_name") or "GitHub activity"
+        resource = resource if isinstance(resource, dict) else {}
+        number = resource.get("number")
+        raw_title = str(resource.get("title") or "")
+        html_url = str(resource.get("html_url") or "")
 
-        body = ""
-        if isinstance(title_source, dict):
-            body = str(title_source.get("body") or "")
-        if not body:
-            body = f"GitHub action: {event_family}.{action}"
+        if number and raw_title:
+            title = f"[{repo_name}#{number}] {raw_title}"
+        elif raw_title:
+            title = f"[{repo_name}] {raw_title}"
+        else:
+            title = repo_name or "GitHub activity"
+
+        body_parts = []
+        if html_url:
+            body_parts.append(html_url)
+        raw_body = str(resource.get("body") or "")
+        if raw_body:
+            body_parts.append(raw_body)
+        state = str(resource.get("state") or "")
+        if state:
+            body_parts.append(f"State: {state}")
+        body_parts.append(f"Action: {event_family}.{action}")
+        body = "\n".join(body_parts)
 
         sender = payload.get("sender", {}) if isinstance(payload.get("sender"), dict) else {}
         return ActivityEvent(
             source=self.source,
             event_type=f"github.{event_family}.{action}",
-            title=str(title),
-            body=str(body),
-            external_id=str(title_source.get("id", payload.get("delivery", "github-event"))),
+            title=title,
+            body=body,
+            external_id=str(resource.get("id", payload.get("delivery", "github-event"))),
             actor=str(sender.get("login")) if sender.get("login") else None,
             metadata=payload,
         )
