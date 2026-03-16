@@ -381,13 +381,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         provider: WebhookProvider,
         request: Request,
     ) -> tuple[dict[str, Any], int]:
+        import json
+        from urllib.parse import parse_qs
+
         logger.info("Webhook received: provider=%s", provider.value)
         raw_body = await request.body()
-        try:
-            payload = await request.json() if raw_body else {}
-        except Exception:
-            logger.warning("Webhook body not JSON: provider=%s", provider.value)
-            payload = {}
+        payload: dict[str, Any] = {}
+        if raw_body:
+            content_type = request.headers.get("content-type", "")
+            if "json" in content_type:
+                try:
+                    payload = json.loads(raw_body)
+                except Exception:
+                    logger.warning("JSON parse failed: provider=%s", provider.value)
+            elif "form" in content_type:
+                parsed = parse_qs(raw_body.decode())
+                form_payload = parsed.get("payload", [None])[0]
+                if form_payload:
+                    try:
+                        payload = json.loads(form_payload)
+                    except Exception:
+                        logger.warning("Form payload parse failed: provider=%s", provider.value)
+            else:
+                try:
+                    payload = json.loads(raw_body)
+                except Exception:
+                    logger.warning("Body parse failed: provider=%s", provider.value)
         verification, envelope = await app.state.webhooks.receive(
             provider,
             raw_body,
